@@ -1,0 +1,110 @@
+:root {
+
+    --background-color: #FEFEFE;
+    --foreground-color: #FFFFFF;
+    --normal-text-color: #353531;
+    --muted-text-color: #C7C4C4;
+    --banner-color: #80B42D;
+    --disabled-field-color: #EEEEEE;
+
+    /* Brand colors */
+    --brand-blue: #1976D2;
+    --brand-orange: #FFA000;
+    --brand-charcoal: #353531;
+    --brand-green: #97CC04;
+    --brand-purple: #B14AED;
+
+    /* Visualization colors */
+    --blue-0: #1E3A57;
+    --blue-1: #2C5078;
+    --blue-2: #3A6696;
+    --blue-3: #4F7EB3;
+    --blue-4: #5F92CD;
+    --blue-5: #7CA8D6;
+    --blue-6: #9EBDE0;
+    --blue-7: #C8DCF1;
+    --blue-8: #EFF4FB;
+
+    --violet-0: #42314D;
+    --violet-1: #5B466C;
+    --violet-2: #6D5280;
+    --violet-3: #826199;
+    --violet-4: #9772B1;
+    --violet-5: #B39BC8;
+    --violet-6: #CEBEDD;
+    --violet-7: #E2D2E9;
+    --violet-8: #F0E9F3;
+
+    --teal-0: #004840;
+    --teal-1: #006257;
+    --teal-2: #007D70;
+    --teal-3: #009A89;
+    --teal-4: #00B29F;
+    --teal-5: #52C0B6;
+    --teal-6: #86CFCB;
+    --teal-7: #BCE5E5;
+    --teal-8: #E4F3F2;
+
+    --yellow-0: #786127;
+    --yellow-1: #93792D;
+    --yellow-2: #B9962F;
+    --yellow-3: #D8AF28;
+    --yellow-4: #ECC01B;
+    --yellow-5: #F3D35F;
+    --yellow-6: #F6E397;
+    --yellow-7: #FAEFBB;
+    --yellow-8: #FDF8E9;
+    --yellow-9: #FAEC88;
+    --yellow-10: #FDFED7;
+
+    --orange-0: #803A1C;
+    --orange-1: #9E4A23;
+    --orange-2: #BC5828;
+    --orange-3: #D36227;
+    --orange-4: #F48144;
+    --orange-5: #F69663;
+    --orange-6: #FAB893;
+    --orange-7: #F8D8C6;
+    --orange-8: #FFF3ED;
+
+    --indigo-0: #5D2B46;
+    --indigo-1: #7E395D;
+    --indigo-2: #A14A78;
+    --indigo-3: #C15F93;
+    --indigo-4: #E079AF;
+    --indigo-5: #E794BF;
+    --indigo-6: #EEBCD7;
+    --indigo-7: #F4CFDD;
+    --indigo-8: #F6EAF0;
+
+    --red-0: #662222;
+    --red-1: #8A3131;
+    --red-2: #B04545;
+    --red-3: #D95254;
+    --red-4: #F06260;
+    --red-5: #FA7F7E;
+    --red-6: #F7ADB1;
+    --red-7: #F7D2CF;
+    --red-8: #FDEEED;
+
+    --green-0: #244423;
+    --green-1: #315F2E;
+    --green-2: #3D7639;
+    --green-3: #4B9142;
+    --green-4: #58A745;
+    --green-5: #7ABA6A;
+    --green-6: #AAD3A1;
+    --green-7: #D2EBCA;
+    --green-8: #EFF6EB;
+
+    --gray-0: #000000;
+    --gray-1: #4E4E4E;
+    --gray-2: #757272;
+    --gray-3: #9B9A9A;
+    --gray-4: #B4B2B2;
+    --gray-5: #C7C4C4;
+    --gray-6: #DBDBDB;
+    --gray-7: #EAEAEA;
+    --gray-8: #F2F2F2;
+    --gray-9: #f8f8f8;
+}
