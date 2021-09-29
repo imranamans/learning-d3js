@@ -6,7 +6,11 @@
 	<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.0.1/d3.min.js"
 		integrity="sha512-1e0JvdNhUkvFbAURPPlFKcX0mWu/b6GT9e0uve7BW4MFxJ15q4ZCd/Llz+B7/oh+qhw7/l6Q1ObPt6aAuR01+Q=="
 		crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"
+		integrity="sha512-qTXRIMyZIFb8iQcfjXWCO8+M5Tbc38Qi5WzdPOYZHIlZpzBHG3L3by84BBBOiRGiEb7KKtAOAs5qYdUiZiQNNQ=="
+		crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 	<script module src="./d3jsDemo3.js"></script>
+	<script module src="./d3jsBloodPressureDemo.js"></script>
 	<link rel="stylesheet" href="color.css">
 	<style>
 		g.axis line,
@@ -20,7 +24,7 @@
 		}
 
 		g.x.axis text {
-			font-size: 7px;
+			font-size: 8px;
 			font-weight: 400;
 		}
 
@@ -31,17 +35,23 @@
 
 		g.chart-line path {
 			fill: none;
-			stroke: var(--gray-6);
+			stroke: var(--gray-4);
 		}
 
 		g.chart-points path {
 			stroke: var(--brand-blue);
 		}
+
+		g.chart-points-text-group text {
+			fill: var(--brand-blue);
+		}
 	</style>
 </head>
 
-<body onload="makeDemo()">
-	<div id="chartContainer">
+<body onload="makeDemo();makeBloodPressureDemo()">
+	<!-- <div id="chartContainer">
+	</div> -->
+	<div id="bloodPressureDemo">
 	</div>
 </body>
 
