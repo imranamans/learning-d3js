@@ -69,6 +69,17 @@ function makeBloodPressureDemo() {
         ]
     }.response;
 
+    let dataMedChange = [
+        {
+            dateChanged: "2021-04-18 22:07:38.0"
+        },
+        {
+            dateChanged: "2021-04-22 18:07:13.0"
+        }
+    ];
+
+    dataMedChange = dataMedChange.map((d) => ({ dateChanged: moment(d.dateChanged).toDate() }));
+
     data = data.map((d) => {
         return {
             dateMeasured: moment(d.date_measured).toDate(),
@@ -143,12 +154,24 @@ function makeBloodPressureDemo() {
     // console.log('svgWidth:', svgWidth, 'svgHeight:', svgHeight, 'svg', svg);
 
     const timeDomain = d3.extent(data, function (d) {
+        console.log('dateMeasured', d['dateMeasured']);
         const x = new Date(d['dateMeasured']);
         return x;
     });
 
     const scX = d3.scaleTime()
         .domain(timeDomain)
+        .range([margin.left, svgWidth - margin.right])
+        .nice();
+
+    const domainX1 = d3.extent(dataMedChange, function (d) {
+        console.log('dateChanged', d['dateChanged']);
+        // const x = new Date();
+        return d['dateChanged'];
+    });
+
+    const scX1 = d3.scaleTime()
+        .domain(domainX1)
         .range([margin.left, svgWidth - margin.right])
         .nice();
 
@@ -251,6 +274,33 @@ function makeBloodPressureDemo() {
         .attr('x2', function (d) { return scX(new Date(d['dateMeasured'])); })
         .attr('y2', function (d) { return scY(d['diastolicValue']); })
 
+    // Med change
+    // svg.append('g')
+    //     .attr('id', 'medChangeGroup')
+    //     .selectAll('text')
+    //     .data(dataMedChange)
+    //     .enter()
+    //     .append('text')
+    //     .attr('x', (d) => scX1(d['dateChanged']))
+    //     .attr('y', (d) => scY(55))
+    //     // .attr('font-family', 'Font Awesome 5 Brands')
+    //     // .attr('font-size', function (d) { return 2 + 'em' })
+    //     .attr("class", "fa")
+    //     .text('\uf484');
+
+    svg.append('g')
+        .attr('id', 'medChangeGroup')
+        .selectAll('text')
+        .data(dataMedChange)
+        .enter()
+        .append('text')
+        .attr('x', (d) => scX1(d['dateChanged']))
+        .attr('y', (d) => scY(55))
+        .attr("class", "fas")
+        .attr('font-size', '15px')
+        .attr('fill', 'var(--gray-2)')
+        .text('\uf484');
+
 
     var symbolTypes = {
         "diamond": d3.symbol(d3.symbolDiamond, 40),
@@ -349,6 +399,8 @@ function makeBloodPressureDemo() {
         .tickPadding(10)
         // .ticks(10)
         ;
+
+    // console.log(1, yAxisGenerator.scale().ticks());
 
     const yAxis = svg.append('g')
         .classed('y axis', true)

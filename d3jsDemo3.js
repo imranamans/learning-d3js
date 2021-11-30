@@ -57,13 +57,17 @@ function makeDemo() {
         return {
             value: d.value,
             dateMeasured: moment(d.date_measured).toDate(),
-            patientId: d.patient_id,
+            patient: {
+                id: d.patient_id
+            },
             fasting: d.fasting
         };
     });
 
-    const svgWidth = 1152;
-    const svgHeight = 300;
+    console.log(JSON.stringify(data));
+
+    const width = 1152;
+    const height = 300;
 
     const margin = { top: 20, right: 20, bottom: 40, left: 40 };
     // const pxX = svgWidth - margin.left - margin.right;
@@ -81,20 +85,19 @@ function makeDemo() {
         // .attr('width', svgWidth)
         // .attr('preserveAspectRatio', 'xMinYMin meet')
         // .attr('viewBox', `0 0 ${svgWidth - margin.right - margin.left} ${svgHeight - margin.top - margin.bottom}`)
-        .attr('viewBox', `0 0 ${svgWidth} ${svgHeight}`)
+        .attr('viewBox', `0 0 ${width} ${height}`)
         // .classed('svg-content', true)
         ;
 
     // console.log('svgWidth:', svgWidth, 'svgHeight:', svgHeight, 'svg', svg);
 
-    const timeDomain = d3.extent(data, function (d) {
-        const x = new Date(d['dateMeasured']);
-        return x;
+    const domainX = d3.extent(data, function (d) {
+        return d['dateMeasured'];
     });
 
-    const scX = d3.scaleTime()
-        .domain(timeDomain)
-        .range([margin.left, svgWidth - margin.right])
+    const scaleX = d3.scaleTime()
+        .domain(domainX)
+        .range([margin.left, width - margin.right])
         .nice();
 
     const thresholdLow = 80;
@@ -108,10 +111,10 @@ function makeDemo() {
     const yMaxValue = Math.max(...yDomainValues);
     const yMaxDomain = yMaxValue > thresholdHigh ? yMaxValue : thresholdHigh;
 
-    const scY = d3.scaleLinear()
+    const scaleY = d3.scaleLinear()
         // .domain(d3.extent(data, d => d['value']))
         .domain([yMinDomain, yMaxDomain])
-        .range([svgHeight - margin.bottom, margin.top])
+        .range([height - margin.bottom, margin.top])
         .nice();
 
     var thresholdRanges = [
@@ -132,12 +135,12 @@ function makeDemo() {
     thresholdGroup.append("rect")
         .attr("x", margin.left)
         .attr("y", function (d) {
-            return scY(d.rangeEnd);
+            return scaleY(d.rangeEnd);
         })
         .attr("height", function (d) {
-            return scY(d.rangeStart) - scY(d.rangeEnd);
+            return scaleY(d.rangeStart) - scaleY(d.rangeEnd);
         })
-        .attr("width", svgWidth - margin.right - margin.left)
+        .attr("width", width - margin.right - margin.left)
         .style("fill", function (d) { return d.color; });
 
     const thresholdBorder = svg
@@ -152,13 +155,13 @@ function makeDemo() {
         .attr('stroke', 'var(--gray-5)')
         .attr('stroke-dasharray', '2,2')
         .attr('x1', margin.left)
-        .attr('y1', function (d) { return scY(d.rangeEnd); })
-        .attr('x2', function (d) { return svgWidth - margin.right; })
-        .attr('y2', function (d) { return scY(d.rangeEnd); })
+        .attr('y1', function (d) { return scaleY(d.rangeEnd); })
+        .attr('x2', function (d) { return width - margin.right; })
+        .attr('y2', function (d) { return scaleY(d.rangeEnd); })
 
     const lineMaker = d3.line()
-        .x(d => scX(new Date(d['dateMeasured'])))
-        .y(d => scY(d['value']));
+        .x(d => scaleX(d['dateMeasured']))
+        .y(d => scaleY(d['value']));
 
     svg.append('g')
         .attr('id', 'chartLineGroup')
@@ -183,7 +186,7 @@ function makeDemo() {
             return symbolFunction();
         })
         .attr("transform", function (d) {
-            return "translate(" + scX(new Date(d['dateMeasured'])) + "," + scY(d['value']) + ")";
+            return "translate(" + scaleX(d['dateMeasured']) + "," + scaleY(d['value']) + ")";
         })
         .attr('fill', function (d, i) {
             // return (d.value < thresholdLow || d.value > thresholdHigh) ? 'var(--foreground-color)' : 'var(--brand-blue)';
@@ -197,8 +200,8 @@ function makeDemo() {
         .data(data)
         .enter()
         .append('text')
-        .attr('x', (d) => scX(new Date(d['dateMeasured'])) - 3)
-        .attr('y', (d) => scY(d['value']) - 7)
+        .attr('x', (d) => scaleX(d['dateMeasured']) - 3)
+        .attr('y', (d) => scaleY(d['value']) - 7)
         .text((d) => d.value);
 
     svg.select('#chartPointsGroup')
@@ -210,7 +213,7 @@ function makeDemo() {
     const timeFormat = d3.utcFormat("%H:%M %p");
 
     // X Axis
-    const xAxisGenerator = d3.axisBottom(scX)
+    const xAxisGenerator = d3.axisBottom(scaleX)
         // .tickSize(-(svgHeight - margin.top - margin.bottom))
         .tickSize(-6)
         // .tickSizeInner(3)
@@ -221,13 +224,15 @@ function makeDemo() {
         .ticks(20)
         ;
 
+    console.log('xAxisGenerator', xAxisGenerator);
+
     const xAxis = svg.append('g')
         .classed('x axis', true)
-        .attr('transform', `translate(0, ${svgHeight - margin.bottom})`)
+        .attr('transform', `translate(0, ${height - margin.bottom})`)
         .call(xAxisGenerator);
 
     // Y Axis
-    const yAxisGenerator = d3.axisLeft(scY)
+    const yAxisGenerator = d3.axisLeft(scaleY)
         // .tickSize(-(svgWidth - margin.right - margin.left))
         .tickSize(0)
         .tickPadding(10)
