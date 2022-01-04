@@ -38,7 +38,8 @@
 
 <script>
 import {
-    clearChart, debugChart,
+    clearChart,
+    debugChart,
     drawAnnotation,
     drawAxes,
     drawGridLines,
@@ -46,8 +47,6 @@ import {
     drawLine,
     drawPoints,
     drawShadedRegion,
-    redrawLine,
-    redrawPoints
 } from './Chart.js';
 import {merge} from 'lodash';
 
@@ -259,8 +258,8 @@ export default {
             // drawShadedRegion(this.config, this.data, this.$refs.lineChart);
             // drawGridLines(this.config, this.data, this.$refs.lineChart);
             // drawAxes(this.config, this.data, this.$refs.lineChart);
-            redrawLine(this.config, this.data, this.$refs.lineChart);
-            redrawPoints(this.config, this.data, this.$refs.lineChart);
+            drawLine(this.config, this.data, this.$refs.lineChart);
+            drawPoints(this.config, this.data, this.$refs.lineChart);
             // drawLegend(this.config, this.$refs.lineChart);
             // drawAnnotation(this.config, this.data, this.$refs.lineChart);
         },

@@ -117,7 +117,7 @@ export function drawAxes(config, data, svg) {
     drawAxisY(config, data, svg);
 }
 
-export function redrawLine(config, data, svg) {
+export function drawLine(config, data, svg) {
     const x = config.parsing.xAxisKey;
     const y = config.parsing.yAxisKey;
 
@@ -149,7 +149,7 @@ export function redrawLine(config, data, svg) {
     animateLine(config, linePath);
 }
 
-export function redrawPoints(config, data, svg) {
+export function drawPoints(config, data, svg) {
     if (!config.points.display || !data.length) {
         return;
     }
@@ -841,18 +841,22 @@ function animateLine(config, linePath) {
 
 function animatePointGroupsEnter(config, enter, scX, scY, x, y) {
     const animation = resolveAnimationConfig(config.points.animation);
-    if (!animation.enabled) {
-        return;
-    }
 
-    enter
-        .transition()
-        .duration(animation.duration)
-        .delay(animation.delay)
-        .ease(resolveEase(animation.ease))
-        .attr('transform', function(d) {
-            return `translate(${scX(d[x])}, ${scY(d[y])})`;
-        });
+    if (animation.enabled) {
+        enter
+            .transition()
+            .duration(animation.duration)
+            .delay(animation.delay)
+            .ease(resolveEase(animation.ease))
+            .attr('transform', function(d) {
+                return `translate(${scX(d[x])}, ${scY(d[y])})`;
+            });
+    } else {
+        enter
+            .attr('transform', function(d) {
+                return `translate(${scX(d[x])}, ${scY(d[y])})`;
+            });
+    }
 }
 
 function animatePointGroupsExit(config, exit, scX, scY, x, y) {
