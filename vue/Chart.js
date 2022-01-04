@@ -3,8 +3,17 @@ import {
     axisLeft,
     axisRight,
     axisTop,
+    curveLinear,
+    easeBack,
+    easeBounce,
+    easeCircle,
+    easeCubic,
+    easeElastic,
+    easeExp,
     easeLinear,
+    easePoly,
     easeQuad,
+    easeSin,
     event,
     extent,
     line,
@@ -117,36 +126,25 @@ export function redrawLine(config, data, svg) {
 
     const lineMakerFn = line()
         .x(d => scX(d[x]))
-        .y(d => scY(d[y]));
+        .y(d => scY(d[y]))
+        .curve(curveLinear);
 
-    const svgSelect = select(svg);
+    const lineGroup = select(svg).select('g.line');
 
-    const linePath = svgSelect
-        .select('path.line-path')
-        .attr('d', lineMakerFn(data));
+    let linePath = lineGroup
+        .select('.line-path');
 
-    animateLine(config, linePath);
-}
+    if (!linePath.node()) {
+        linePath = lineGroup
+            .append('path')
+            .attr('class', 'line-path');
+    }
 
-export function drawLine(config, data, svg) {
-    const x = config.parsing.xAxisKey;
-    const y = config.parsing.yAxisKey;
-
-    const scX = scaleX(config, data);
-    const scY = scaleY(config, data);
-
-    const lineMakerFn = line()
-        .x(d => scX(d[x]))
-        .y(d => scY(d[y]));
-
-    const linePath = select(svg)
-        .select('g.line')
-        .append('path')
-        .attr('d', lineMakerFn(data))
-        .attr('class', 'line-path')
+    linePath
         .attr('fill', 'none')
         .attr('stroke', config.line.color)
-        .attr('stroke-width', config.line.width);
+        .attr('stroke-width', config.line.width)
+        .attr('d', lineMakerFn(data));
 
     animateLine(config, linePath);
 }
@@ -162,27 +160,12 @@ export function redrawPoints(config, data, svg) {
     const scX = scaleX(config, data);
     const scY = scaleY(config, data);
 
-    const t = select(svg).transition()
-        .duration(750)
-        .ease(easeLinear);
-
     const pointGroupsUpdate = select('g.points')
-            .selectAll('g')
-            .data(data, config.dataKey)
-            .attr('transform', function(d) {
-                return `translate(${scX(d[x])}, ${scY(d[y])})`;
-            })
-        /*.call(update => {
-                if (config.points.animate) {
-                    update.transition(t)
-                        .attr('transform', function(d) {
-                            return `translate(${scX(d[x])}, ${scY(d[y])})`;
-                        });
-                }
-            }
-        )*/;
-
-    // console.log('pointGroupsUpdate', pointGroupsUpdate);
+        .selectAll('g')
+        .data(data, config.dataKey)
+        .attr('transform', function(d) {
+            return `translate(${scX(d[x])}, ${scY(d[y])})`;
+        });
 
     const pointGroupsEnter = pointGroupsUpdate
         .enter()
@@ -190,97 +173,48 @@ export function redrawPoints(config, data, svg) {
         .attr('transform', function(d) {
             return `translate(${scX(d[x])}, 0)`;
         })
-        .call(enter => {
-                if (config.points.animate) {
-                    enter.transition(t)
-                        .attr('transform', function(d) {
-                            return `translate(${scX(d[x])}, ${scY(d[y])})`;
-                        });
-                }
+        .call(enter => animatePointGroupsEnter(config, enter, scX, scY, x, y));
+
+    pointGroupsUpdate
+        .exit()
+        .call(exit => animatePointGroupsExit(config, exit, scX, scY, x, y));
+
+    const pointsGroup = pointGroupsEnter.merge(pointGroupsUpdate);
+
+    pointsGroup
+        .each(function(d, i) {
+            const pointPathGroup = select(this);
+
+            let pointPath = pointPathGroup.select('.point-path');
+
+            if (!pointPath.node()) {
+                pointPath = pointPathGroup
+                    .append('path')
+                    .attr('class', 'point-path');
             }
-        );
 
-    // console.log('pointGroupsEnter', pointGroupsEnter);
-
-    const pointGroupsExit = pointGroupsUpdate
-        .exit();
-
-    if (config.points.animate) {
-        pointGroupsExit
-            .call(exit => exit.transition(t)
-                .attr('transform', function(d) {
-                    const currentTranslateString = select(this).attr('transform');
-                    const currentTranslate = currentTranslateString.substring(currentTranslateString.indexOf('(') + 1, currentTranslateString.indexOf(')')).split(',');
-
-                    return `translate(${currentTranslate[0]}, ${scY(scY.domain()[0])})`;
-                })
-                .remove()
-            );
-    } else {
-        pointGroupsExit.remove();
-    }
-
-    const pointPaths = pointGroupsEnter
-        .append('path')
-        .attr('d', function(d, i) {
-            const shapeFn = symbolTypes[config.points.shape(d, i)];
-            const size = config.points.size(d, i);
-            if (size) {
-                shapeFn.size(size);
-            }
-            return shapeFn();
-        })
-        .attr('stroke', config.points.borderColor)
-        .attr('stroke-width', config.points.borderWidth)
-        .attr('fill', config.points.backgroundColor);
-
-    // const pointsGroup = pointGroupsEnter.merge(pointGroupsUpdate);
-
-    // console.log('pointsGroup combined', pointsGroup);
-
-    drawPointsTooltip(config, data, svg, pointPaths);
-
-    drawPointsText(config, pointGroupsEnter, pointPaths);
-}
-
-export function drawPoints(config, data, svg) {
-    if (!config.points.display || !data.length) {
-        return;
-    }
-
-    const x = config.parsing.xAxisKey;
-    const y = config.parsing.yAxisKey;
-
-    const scX = scaleX(config, data);
-    const scY = scaleY(config, data);
-
-    const pointGroups = select(svg)
-        .select('g.points')
-        .selectAll('g')
-        .data(data, config.dataKey)
-        .enter()
-        .append('g')
-        .attr('transform', function(d) {
-            return 'translate(' + scX(d[x]) + ',' + scY(d[y]) + ')';
+            pointPath
+                .attr('d', getPointPathShape)
+                .attr('stroke', config.points.borderColor)
+                .attr('stroke-width', config.points.borderWidth)
+                .attr('fill', config.points.backgroundColor);
         });
 
-    const pointPaths = pointGroups
-        .append('path')
-        .attr('d', function(d, i) {
-            const shapeFn = symbolTypes[config.points.shape(d, i)];
-            const size = config.points.size(d, i);
-            if (size) {
-                shapeFn.size(size);
-            }
-            return shapeFn();
-        })
-        .attr('stroke', config.points.borderColor)
-        .attr('stroke-width', config.points.borderWidth)
-        .attr('fill', config.points.backgroundColor);
+    const pointPaths = pointsGroup.selectAll('path.point-path');
 
     drawPointsTooltip(config, data, svg, pointPaths);
 
-    drawPointsText(config, pointGroups, pointPaths);
+    drawPointsText(config, pointsGroup, pointPaths);
+
+    function getPointPathShape(d, i) {
+        const shape = getConfigValue(config.points.shape, d, i);
+        const shapeFn = symbolTypes[shape];
+        const size = getConfigValue(config.points.size, d, i);
+        if (size) {
+            shapeFn.size(size);
+        }
+        return shapeFn();
+    }
 }
 
 export function drawLegend(config, svg) {
@@ -708,13 +642,28 @@ function drawPointsText(config, pointGroups, pointPaths) {
 
     if (!!config.points.labels.image) {
 
+        pointGroups
+            .each(function(d, i) {
+
+                const pointImageGroup = select(this);
+
+                let pointImage = pointImageGroup.select('.point-label-image');
+
+                if (!pointImage.node()) {
+                    pointImage = pointImageGroup
+                        .append('svg:image')
+                        .attr('class', 'point-label-image');
+                }
+                pointImage
+                    .attr('xlink:href', config.points.labels.image)
+                    .attr('width', config.points.labels.imageWidth)
+                    .attr('height', config.points.labels.imageHeight)
+                    .attr('x', config.points.labels.x)
+                    .attr('y', config.points.labels.y);
+            });
+
         const pointImages = pointGroups
-            .append('svg:image')
-            .attr('xlink:href', config.points.labels.image)
-            .attr('width', config.points.labels.imageWidth)
-            .attr('height', config.points.labels.imageHeight)
-            .attr('x', config.points.labels.x)
-            .attr('y', config.points.labels.y);
+            .selectAll('.point-label-image');
 
         // Automatically apply x and y, if x and y are not explicity provided.
         pointImages
@@ -738,62 +687,51 @@ function drawPointsText(config, pointGroups, pointPaths) {
 
     if (!!config.points.labels.text) {
 
+        pointGroups
+            .each(function(d, i) {
+
+                const pointLabelGroup = select(this);
+
+                let pointLabel = pointLabelGroup.select('.point-label-text');
+
+                if (!pointLabel.node()) {
+                    pointLabel = pointLabelGroup
+                        // At this point a 'path' element denoting the point should exist.
+                        .insert('text', 'path')
+                        .attr('class', 'point-label-text');
+                }
+                pointLabel
+                    .text(config.points.labels.text)
+                    .attr('x', config.points.labels.x)
+                    .attr('y', config.points.labels.y)
+                    .attr('fill', config.points.labels.color)
+                    .attr('font-size', config.points.labels.fontSize);
+            });
+
         const pointLabels = pointGroups
-            .insert('text', 'path')
-            .text(config.points.labels.text)
-            .attr('x', config.points.labels.x)
-            .attr('y', config.points.labels.y)
-            .attr('fill', config.points.labels.color)
-            .attr('font-size', config.points.labels.fontSize);
-
-        console.log('pointLabels', pointLabels);
+            .selectAll('text.point-label-text');
 
         // Apply x and y offsets (dx & dy) automatically if x and y are not explicity provided.
-        pointLabels.each(function(d, i) {
-            // console.log('pointGroups.each', i, d.id, d.value, select(this));
-            select(this)
-                .attr('dx', (d, i) => {
-                    // center node on the point horizontally
-                    const node = pointLabels.nodes()[i];
-                    const attrX = node.getAttribute('x');
-                    return (!!attrX)
-                        ? undefined
-                        : -(node.getBBox().width / 2);
-                })
-                .attr('dy', (d, i) => {
-                    // position node vertically just above the point
-                    const node = pointLabels.nodes()[i];
-                    const attrY = node.getAttribute('y');
-                    return (!!attrY)
-                        ? undefined
-                        : -(pointPaths.nodes()[i].getBBox().height);
-                });
-        });
-
-        // Apply x and y offsets (dx & dy) automatically if x and y are not explicity provided.
-        // pointLabels
-        //     .attr('dx', (d, i) => {
-        //         // center node on the point horizontally
-        //         const node = pointLabels.nodes()[i];
-        //         // if (!node) {
-        //         //     return null;
-        //         // }
-        //         const attrX = node.getAttribute('x');
-        //         return (!!attrX)
-        //             ? attrX
-        //             : -(node.getBBox().width / 2);
-        //     })
-        //     .attr('dy', (d, i) => {
-        //         // position node vertically just above the point
-        //         const node = pointLabels.nodes()[i];
-        //         // if (!node) {
-        //         //     return null;
-        //         // }
-        //         const attrY = node.getAttribute('y');
-        //         return (!!attrY)
-        //             ? attrY
-        //             : -(pointPaths.nodes()[i].getBBox().height);
-        //     });
+        pointLabels
+            .each(function(d, i) {
+                select(this)
+                    .attr('dx', (d, i) => {
+                        // center node on the point horizontally
+                        const node = pointLabels.nodes()[i];
+                        const attrX = node.getAttribute('x');
+                        return (!!attrX)
+                            ? undefined
+                            : -(node.getBBox().width / 2);
+                    })
+                    .attr('dy', (d, i) => {
+                        // position node vertically just above the point
+                        const node = pointLabels.nodes()[i];
+                        const attrY = node.getAttribute('y');
+                        return (!!attrY)
+                            ? undefined
+                            : -(pointPaths.nodes()[i].getBBox().height);
+                    });
+            });
     }
 }
 
@@ -883,17 +821,118 @@ function drawPointsTooltip(config, data, svg, pointPaths) {
 
 function animateLine(config, linePath) {
 
-    if (!config.line.animate) {
+    const animation = resolveAnimationConfig(config.line.animation);
+
+    if (!animation.enabled) {
         return;
     }
-
+    // Line grow animation
     const totalLength = linePath.node().getTotalLength();
 
     linePath
         .attr('stroke-dasharray', `${totalLength} ${totalLength}`)
         .attr('stroke-dashoffset', totalLength)
         .transition()
-        .duration(2000)
-        .ease(easeQuad)
+        .duration(animation.duration)
+        .delay(animation.delay)
+        .ease(resolveEase(animation.ease))
         .attr('stroke-dashoffset', 0);
+}
+
+function animatePointGroupsEnter(config, enter, scX, scY, x, y) {
+    const animation = resolveAnimationConfig(config.points.animation);
+    if (!animation.enabled) {
+        return;
+    }
+
+    enter
+        .transition()
+        .duration(animation.duration)
+        .delay(animation.delay)
+        .ease(resolveEase(animation.ease))
+        .attr('transform', function(d) {
+            return `translate(${scX(d[x])}, ${scY(d[y])})`;
+        });
+}
+
+function animatePointGroupsExit(config, exit, scX, scY, x, y) {
+    const animation = resolveAnimationConfig(config.points.animation);
+    if (animation.enabled) {
+        exit
+            .transition()
+            .duration(animation.duration)
+            .delay(animation.delay)
+            .ease(resolveEase(animation.ease))
+            .attr('transform', function(d) {
+                const currentTranslateString = select(this).attr('transform');
+                const currentTranslate = currentTranslateString
+                    .substring(currentTranslateString.indexOf('(') + 1, currentTranslateString.indexOf(')'))
+                    .split(',');
+
+                return `translate(${currentTranslate[0]}, ${config.height})`;
+            })
+            .remove();
+    } else {
+
+        exit.remove();
+    }
+}
+
+function getConfigValue(valOrFn, d, i) {
+    if (!valOrFn) {
+        return valOrFn;
+    }
+
+    return typeof valOrFn === 'function' ? valOrFn(d, i) : valOrFn;
+}
+
+function resolveAnimationConfig(animationConfig) {
+    const resolvedConfig = animationConfigDefaults();
+    if (!animationConfig) {
+        resolvedConfig.enabled = false;
+        return resolvedConfig;
+    }
+    if (typeof animationConfig === 'boolean') {
+        resolvedConfig.enabled = animationConfig;
+    }
+    if (typeof animationConfig === 'object') {
+        Object.assign(resolvedConfig, animationConfig);
+    }
+    return resolvedConfig;
+}
+
+function animationConfigDefaults() {
+    return {
+        enabled: true,
+        duration: 1000,
+        easing: 'easeLinear',
+        delay: null
+    };
+}
+
+function resolveEase(easeStr) {
+    switch (easeStr) {
+        case 'easeElastic':
+            return easeElastic;
+        case 'easeBounce':
+            return easeBounce;
+        case 'easeLinear':
+            return easeLinear;
+        case 'easeSin':
+            return easeSin;
+        case 'easeQuad':
+            return easeQuad;
+        case 'easeCubic':
+            return easeCubic;
+        case 'easePoly':
+            return easePoly;
+        case 'easeCircle':
+            return easeCircle;
+        case 'easeExp':
+            return easeExp;
+        case 'easeBack':
+            return easeBack;
+        default:
+            return easeLinear;
+    }
 }

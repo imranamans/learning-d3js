@@ -182,7 +182,7 @@ export default {
                     backgroundColor: function(d, i) {
                         return 'var(--brand-blue)';
                     },
-                    animate: true,
+                    animation: false,
                     labels: {
                         display: false,
                         text: function(d, i) {
@@ -217,7 +217,7 @@ export default {
                 line: {
                     color: 'var(--gray-4)',
                     width: 0.5,
-                    animate: true
+                    animation: false
                 },
                 legend: {
                     padding: 10,
@@ -259,7 +259,7 @@ export default {
             // drawShadedRegion(this.config, this.data, this.$refs.lineChart);
             // drawGridLines(this.config, this.data, this.$refs.lineChart);
             // drawAxes(this.config, this.data, this.$refs.lineChart);
-            drawLine(this.config, this.data, this.$refs.lineChart);
+            redrawLine(this.config, this.data, this.$refs.lineChart);
             redrawPoints(this.config, this.data, this.$refs.lineChart);
             // drawLegend(this.config, this.$refs.lineChart);
             // drawAnnotation(this.config, this.data, this.$refs.lineChart);
