@@ -14,7 +14,6 @@ import {
     easePoly,
     easeQuad,
     easeSin,
-    event,
     extent,
     line,
     max,
@@ -31,8 +30,9 @@ import {
     symbolStar,
     symbolTriangle,
     symbolWye,
-    timeFormat
+    transition
 } from 'd3';
+import {get, merge, omit, pick} from 'lodash';
 
 const squareDiamondSymbol = {
     draw: function(context, size) {
@@ -63,32 +63,129 @@ const symbolTypes = {
     'wye': symbol().type(symbolWye).size(20)
 };
 
-export function drawShadedRegion(config, data, svg) {
-    if (!config.shadedRegion.display || !data.length) {
+export function clearChart(config, data, parentElement) {
+    select(parentElement)
+        .selectAll('g > *')
+        .remove();
+}
+
+/**
+ * Config resolution strategy: the config closest to data wins.
+ * @param config
+ * @param data
+ */
+export function resolveConfig(config, data) {
+
+    for (let i = 0; i < data.datasets.length; i++) {
+
+        data.datasets[i] = merge({},
+            omit(config, ['shadedRegion', 'annotation', 'legend']),
+            datasetConfigDefaults('Dataset' + (i + 1)),
+            data.datasets[i]
+        );
+
+        if (!data.datasets[i].id) {
+            data.datasets[i].id = 'dataset' + i;
+        }
+    }
+}
+
+export function makeScales(data) {
+
+    function groupByScale(data) {
+
+        const domainDataByScale = {/* scaleId (eg. x): { data: [x1, x2, x3], config: {} } */};
+
+        function domainDataByScaleTemplate() {
+            return {data: [], config: {scales: {}, margin: {}}, scale: null};
+        }
+
+        const propsToCopy = ['margin', 'width', 'height'];
+
+        for (const dataset of data.datasets) {
+            // x
+            domainDataByScale[dataset.xAxisID] = (domainDataByScale[dataset.xAxisID] || domainDataByScaleTemplate());
+            domainDataByScale[dataset.xAxisID].data = domainDataByScale[dataset.xAxisID].data.concat(
+                dataset.data.map((d) => (d[dataset.parsing.xAxisKey]))
+            );
+            // The latter config with the same scaleId will override the former.
+            domainDataByScale[dataset.xAxisID].config.scales[dataset.xAxisID] = dataset.scales[dataset.xAxisID];
+            Object.assign(domainDataByScale[dataset.xAxisID].config, pick(dataset, propsToCopy));
+            // y
+            domainDataByScale[dataset.yAxisID] = (domainDataByScale[dataset.yAxisID] || domainDataByScaleTemplate());
+            domainDataByScale[dataset.yAxisID].data = domainDataByScale[dataset.yAxisID].data.concat(
+                dataset.data.map((d) => (d[dataset.parsing.yAxisKey]))
+            );
+            domainDataByScale[dataset.yAxisID].config.scales[dataset.yAxisID] = dataset.scales[dataset.yAxisID];
+            Object.assign(domainDataByScale[dataset.yAxisID].config, pick(dataset, propsToCopy));
+        }
+
+        return domainDataByScale;
+    }
+
+    const groupedByScale = groupByScale(data);
+
+    for (const [scaleId, value] of Object.entries(groupedByScale)) {
+        value.scale = makeScale(value.config, value.data, scaleId, (d) => (d));
+    }
+
+    return groupedByScale;
+}
+
+export function makeScale(config, data = [], scaleId, accessor = getAccessor(config, scaleId)) {
+    const scaleConfig = config.scales[scaleId];
+    const scale = getScaleByType(scaleConfig.type)
+        .domain(getDomain(config, data, scaleId, accessor))
+        .range(getRange(config, scaleId));
+    return scaleConfig.nice ? scale.nice() : scale;
+}
+
+export function drawShadedRegion(config, data, parentElement, scX, scY = makeScale(config, data, 'y')) {
+
+    if (!get(config, 'shadedRegion.display', false) || !data.length) {
         return;
     }
-    const scY = scaleY(config, data);
+
     const domainMin = scY.domain()[0];
     const domainMax = scY.domain()[1];
     const regionStart = config.shadedRegion.y.start;
     const regionEnd = config.shadedRegion.y.end;
 
-    // shaded area
-    select(svg)
+    let shadedArea = select(parentElement)
         .select('g.shaded-region')
-        .append('rect')
+        .select('.shaded-area');
+
+    if (!shadedArea.node()) {
+        shadedArea = select(parentElement)
+            .select('g.shaded-region')
+            .append('rect')
+            .attr('class', 'shaded-area');
+    }
+
+    // shaded area
+    shadedArea
         .attr('x', config.margin.left)
         .attr('y', scY(regionEnd > domainMax ? domainMax : regionEnd))
         .attr('height', scY(regionStart < domainMin ? domainMin : regionStart) - scY(regionEnd > domainMax ? domainMax : regionEnd))
-        .attr('width', internalWidth(config))
+        .attr('width', getInternalWidth(config))
         .style('fill', config.shadedRegion.backgroundColor);
 
     // borders for shaded area rendered only when within scale
     if (regionEnd <= domainMax) {
         // top bound
-        select(svg)
+        let borderTop = select(parentElement)
             .select('g.shaded-region-border')
-            .append('line')
+            .select('.shaded-region-border-top');
+
+        if (!borderTop.node()) {
+
+            borderTop = select(parentElement)
+                .select('g.shaded-region-border')
+                .append('line')
+                .attr('class', 'shaded-region-border-top');
+        }
+
+        borderTop
             .attr('x1', config.margin.left)
             .attr('y1', scY(regionEnd))
             .attr('x2', config.width - config.margin.right)
@@ -97,9 +194,18 @@ export function drawShadedRegion(config, data, svg) {
 
     if (regionStart >= domainMin) {
         // bottom bound
-        select(svg)
+        let borderBottom = select(parentElement)
             .select('g.shaded-region-border')
-            .append('line')
+            .select('.shaded-region-border-bottom');
+
+        if (!borderBottom.node()) {
+            borderBottom = select(parentElement)
+                .select('g.shaded-region-border')
+                .append('line')
+                .attr('class', 'shaded-region-border-bottom');
+        }
+
+        borderBottom
             .attr('x1', config.margin.left)
             .attr('y1', scY(regionStart))
             .attr('x2', config.width - config.margin.right)
@@ -107,29 +213,40 @@ export function drawShadedRegion(config, data, svg) {
     }
 }
 
-export function drawGridLines(config, data, svg) {
-    drawGridLinesX(config, data, svg);
-    drawGridLinesY(config, data, svg);
+export function drawGrids(config, data, parentElement) {
+    drawGrid(config, data, parentElement, 'x');
+    drawGrid(config, data, parentElement, 'y');
 }
 
-export function drawAxes(config, data, svg) {
-    drawAxisX(config, data, svg);
-    drawAxisY(config, data, svg);
+export function drawAxes(config, data, parentElement) {
+    drawAxis(config, data, parentElement, 'x');
+    drawAxis(config, data, parentElement, 'y');
 }
 
-export function drawLine(config, data, svg) {
-    const x = config.parsing.xAxisKey;
-    const y = config.parsing.yAxisKey;
+export function drawLine(
+    config,
+    data,
+    parentElement,
+    datasetId = 'dataset0',
+    xScaleId = 'x',
+    yScaleId = 'y',
+    scX = makeScale(config, data, xScaleId),
+    scY = makeScale(config, data, yScaleId)
+) {
 
-    const scX = scaleX(config, data);
-    const scY = scaleY(config, data);
+    if (!get(config, 'line.display', false)) {
+        return;
+    }
+
+    const xAxisKey = getAxisKey(config, xScaleId);
+    const yAxisKey = getAxisKey(config, yScaleId);
 
     const lineMakerFn = line()
-        .x(d => scX(d[x]))
-        .y(d => scY(d[y]))
+        .x(d => scX(d[xAxisKey]))
+        .y(d => scY(d[yAxisKey]))
         .curve(curveLinear);
 
-    const lineGroup = select(svg).select('g.line');
+    const lineGroup = getElementSelection(parentElement, 'g', ['line', datasetId]);
 
     let linePath = lineGroup
         .select('.line-path');
@@ -143,41 +260,49 @@ export function drawLine(config, data, svg) {
     linePath
         .attr('fill', 'none')
         .attr('stroke', config.line.color)
-        .attr('stroke-width', config.line.width)
-        .attr('d', lineMakerFn(data));
+        .attr('stroke-width', config.line.width);
 
-    animateLine(config, linePath);
+    animateLine(config, data, linePath, lineMakerFn);
 }
 
-export function drawPoints(config, data, svg) {
-    if (!config.points.display || !data.length) {
+export function drawPoints(
+    config,
+    data,
+    parentElement,
+    datasetId = 'dataset0',
+    xScaleId = 'x',
+    yScaleId = 'y',
+    scX = makeScale(config, data, xScaleId),
+    scY = makeScale(config, data, yScaleId)
+) {
+
+    if (!get(config, 'points.display', false) || !data.length) {
         return;
     }
 
-    const x = config.parsing.xAxisKey;
-    const y = config.parsing.yAxisKey;
+    const xAxisKey = getAxisKey(config, xScaleId);
+    const yAxisKey = getAxisKey(config, yScaleId);
 
-    const scX = scaleX(config, data);
-    const scY = scaleY(config, data);
+    const pointGroupSelector = getElementSelection(parentElement, 'g', ['points', datasetId]);
 
-    const pointGroupsUpdate = select('g.points')
+    const pointGroupsUpdate = pointGroupSelector
         .selectAll('g')
         .data(data, config.dataKey)
         .attr('transform', function(d) {
-            return `translate(${scX(d[x])}, ${scY(d[y])})`;
+            return `translate(${scX(d[xAxisKey])}, ${scY(d[yAxisKey])})`;
         });
 
     const pointGroupsEnter = pointGroupsUpdate
         .enter()
         .append('g')
         .attr('transform', function(d) {
-            return `translate(${scX(d[x])}, 0)`;
+            return `translate(${scX(d[xAxisKey])}, 0)`;
         })
-        .call(enter => animatePointGroupsEnter(config, enter, scX, scY, x, y));
+        .call(enter => animatePointGroupsEnter(config, enter, scX, scY, xAxisKey, yAxisKey));
 
     pointGroupsUpdate
         .exit()
-        .call(exit => animatePointGroupsExit(config, exit, scX, scY, x, y));
+        .call(exit => animatePointGroupsExit(config, exit, scX, scY, xAxisKey, yAxisKey));
 
     const pointsGroup = pointGroupsEnter.merge(pointGroupsUpdate);
 
@@ -202,7 +327,7 @@ export function drawPoints(config, data, svg) {
 
     const pointPaths = pointsGroup.selectAll('path.point-path');
 
-    drawPointsTooltip(config, data, svg, pointPaths);
+    drawPointsTooltip(config, data, parentElement, pointPaths);
 
     drawPointsText(config, pointsGroup, pointPaths);
 
@@ -217,8 +342,9 @@ export function drawPoints(config, data, svg) {
     }
 }
 
-export function drawLegend(config, svg) {
-    if (!config.legend.display) {
+export function drawLegend(config, parentElement) {
+
+    if (!get(config, 'legend.display', false)) {
         return;
     }
 
@@ -227,71 +353,106 @@ export function drawLegend(config, svg) {
     const x = config.margin.left;
     const y = config.height - legendHeight;
 
-    const legend = select(svg)
-        .select('g.legend');
+    const legend = getElementSelection(parentElement, 'g', 'legend');
 
     // legend position, bottom-left by default
     legend
         .attr('transform', `translate(${x}, ${y})`);
 
     const legendGroups = legend
-        .selectAll('g')
+        .selectAll('g.legend-item')
         .data(config.legend.items)
-        .enter()
-        .append('g');
+        .join('g')
+        .attr('class', 'legend-item');
 
     // point shape
     legendGroups
         .filter(d => !!d.point.shape)
-        .append('path')
-        .attr('d', function(d) {
-            const shapeFn = symbolTypes[d.point.shape];
-            if (d.point.size) {
-                shapeFn.size(d.point.size);
+        .each(function(d, i) {
+            let legendItemShape = select(this)
+                .select('path.legend-item-shape');
+            if (!legendItemShape.node()) {
+                legendItemShape = select(this)
+                    .append('path')
+                    .attr('class', 'legend-item-shape');
             }
-            return shapeFn();
-        })
-        .attr('fill', d => d.point.backgroundColor)
-        .attr('stroke', d => d.point.borderColor)
-        .attr('transform', 'translate(0,0)');
+            legendItemShape
+                .attr('d', function(d) {
+                    const shapeFn = symbolTypes[d.point.shape];
+                    if (d.point.size) {
+                        shapeFn.size(d.point.size);
+                    }
+                    return shapeFn();
+                })
+                .attr('fill', d => d.point.backgroundColor)
+                .attr('stroke', d => d.point.borderColor)
+                .attr('transform', 'translate(0,0)');
+        });
 
     // point image
     legendGroups
         .filter(d => !!d.point.image)
-        .append('svg:image')
-        .attr('xlink:href', d => d.point.image)
-        .attr('width', d => d.point.imageWidth)
-        .attr('height', d => d.point.imageHeight)
-        .attr('x', d => -(d.point.imageWidth / 2))
-        .attr('y', d => -(d.point.imageHeight / 2));
+        .each(function(d, i) {
+            let legendItemImage = select(this)
+                .select('.legend-item-image');
+            if (!legendItemImage.node()) {
+                legendItemImage = select(this)
+                    .append('svg:image')
+                    .attr('class', 'legend-item-image');
+            }
+            legendItemImage
+                .attr('xlink:href', d => d.point.image)
+                .attr('width', d => d.point.imageWidth)
+                .attr('height', d => d.point.imageHeight)
+                .attr('x', d => -(d.point.imageWidth / 2))
+                .attr('y', d => -(d.point.imageHeight / 2));
+        });
 
     // point text
     legendGroups
         .filter(d => !!d.point.text)
-        .append('text')
-        .text(function(d) {
-            if (!d.point.text) {
-                return '';
+        .each(function(d, i) {
+            let legendItemText = select(this)
+                .select('text.legend-item-text');
+            if (!legendItemText.node()) {
+                legendItemText = select(this)
+                    .append('text')
+                    .attr('class', 'legend-item-text');
             }
-            return d.point.text.text;
-        })
-        .style('font-size', function(d) {
-            return d.point.text.fontSize ? d.point.text.fontSize : '6px';
-        })
-        .attr('fill', d => d.point.backgroundColor)
-        .attr('dominant-baseline', 'middle')
-        .attr('transform', function(d, i) {
-            return `translate(${d.point.text.x ? d.point.text.x : 0}, ${d.point.text.y ? d.point.text.y : 0})`;
+            legendItemText
+                .text(function(d) {
+                    if (!d.point.text) {
+                        return '';
+                    }
+                    return d.point.text.text;
+                })
+                .style('font-size', function(d) {
+                    return d.point.text.fontSize ? d.point.text.fontSize : '6px';
+                })
+                .attr('fill', d => d.point.backgroundColor)
+                .attr('dominant-baseline', 'middle')
+                .attr('transform', function(d, i) {
+                    return `translate(${d.point.text.x ? d.point.text.x : 0}, ${d.point.text.y ? d.point.text.y : 0})`;
+                });
         });
 
     // legend label
     legendGroups
-        .append('text')
-        .text(d => d.label)
-        .attr('transform', 'translate(5)')
-        .attr('dominant-baseline', 'middle')
-        .style('font-size', config.legend.fontSize)
-        .attr('fill', 'var(--gray-3)');
+        .each(function(d, i) {
+            let legendItemLabel = select(this)
+                .select('text.legend-item-label');
+            if (!legendItemLabel.node()) {
+                legendItemLabel = select(this)
+                    .append('text')
+                    .attr('class', 'legend-item-label');
+            }
+            legendItemLabel
+                .text(d => d.label)
+                .attr('transform', 'translate(5)')
+                .attr('dominant-baseline', 'middle')
+                .style('font-size', config.legend.fontSize)
+                .attr('fill', 'var(--gray-3)');
+        });
 
     const labels = config.legend.items.map(i => i.label);
 
@@ -307,336 +468,425 @@ export function drawLegend(config, svg) {
     });
 }
 
-export function drawAnnotation(config, data, svg) {
+export function drawAxis(config, data, parentElement, scaleId, scale = makeScale(config, data, scaleId)) {
 
-    const annotations = config.annotation.annotations;
+    const scaleConfig = config.scales[scaleId];
 
-    const annotationPoints = Object.values(annotations)
-        // eslint-disable-next-line no-confusing-arrow
-        .filter(it => it.hasOwnProperty('display')
-            ? it.display
-            : true);
-
-    if (annotationPoints.length === 0 || !data.length) {
+    if (!scaleConfig.display) {
         return;
     }
 
-    const scX = scaleX(config, data);
-    const scY = scaleY(config, data);
+    const tickSize = Number.isSafeInteger(scaleConfig.ticks.size) ? scaleConfig.ticks.size : 0;
 
-    const annotationPointsGroup = select(svg)
-        .append('g')
-        .classed('annotation-points', true)
-        .selectAll('g')
-        .data(annotationPoints)
-        .enter()
-        .append('g')
-        .attr('transform', function(d) {
-            return 'translate(' + scX(d['xValue']) + ',' + scY(d['yValue']) + ')';
-        });
+    const axisGenerator = (getAxis(config, scaleId)(scale))
+        .ticks(scaleConfig.type === 'time' && scaleConfig.ticks.timeInterval
+            ? scaleConfig.ticks.timeInterval
+            : scaleConfig.ticks.count)
+        .tickFormat(scaleConfig.ticks.tickFormat)
+        .tickSize(tickSize)
+        .tickSizeInner(Number.isSafeInteger(scaleConfig.ticks.innerSize) ? scaleConfig.ticks.innerSize : tickSize)
+        .tickSizeOuter(Number.isSafeInteger(scaleConfig.ticks.outerSize) ? scaleConfig.ticks.outerSize : tickSize)
+        .tickPadding(Number.isSafeInteger(scaleConfig.ticks.padding) ? scaleConfig.ticks.padding : 0);
 
-    // render shapes
-    annotationPointsGroup
-        .filter(d => d.hasOwnProperty('shape'))
-        .append('path')
-        .attr('d', function(d, i) {
-            const shapeFn = symbolTypes[d.shape];
-            if (d.size) {
-                shapeFn.size(d.size);
-            }
-            return shapeFn();
-        })
-        .attr('stroke', d => d.borderColor)
-        .attr('fill', d => d.backgroundColor);
+    let axis = getElementSelection(parentElement, 'g', `${scaleId}-axis`);
 
-    // render images
-    annotationPointsGroup
-        .filter(d => d.hasOwnProperty('image'))
-        .append('svg:image')
-        .attr('xlink:href', d => d.image)
-        .attr('width', d => d.imageWidth)
-        .attr('height', d => d.imageHeight)
-        .attr('x', d => -(d.imageWidth / 2))
-        .attr('y', d => -(d.imageHeight / 2));
-}
+    axis
+        .attr('transform', getAxisTransform(config, scaleId))
+        .style('color', scaleConfig.ticks.color)
+        .style('stroke-width', scaleConfig.ticks.font.weight)
+        .style('font-size', scaleConfig.ticks.font.size);
 
-export function clearChart(config, data, svg) {
-    select(svg)
-        .selectAll('g > *')
-        .remove();
-}
+    if (scaleConfig.animate) {
+        const t = transition()
+            .duration(500);
+        axis = axis.transition(t);
+    }
+    axis.call(axisGenerator);
 
-export function debugChart(config, data, svg) {
-
-    // DOM to SVG coordinate translation
-    function domToSvg(event) {
-
-        const pt = svg.createSVGPoint();
-
-        // pass event coordinates
-        pt.x = event.clientX;
-        pt.y = event.clientY;
-
-        // transform to SVG coordinates
-        return pt.matrixTransform(svg.getScreenCTM().inverse());
+    if (scaleConfig.ticks.hideAxisLine) {
+        axis = axis.call(g => g.select('.domain').remove());
     }
 
-    const tooltipDiv = select('div.debug-chart-tooltip').node()
-        ? select('div.debug-chart-tooltip')
-        : (
-            select('body')
-                .append('div')
-                .attr('class', 'debug-chart-tooltip top')
-                .style('position', 'absolute')
-                .style('overflow', 'warp')
-                .style('text-align', 'center')
-                .style('width', 'auto')
-                .style('height', 'auto')
-                .style('padding', '8px')
-                .style('background-color', '#4E4E4E')
-                .style('color', '#FFFFFF')
-                .style('pointer-events', 'none')
-                .style('opacity', 0)
-        );
-
-    select(svg)
-        .attr('style', 'border:1px solid black')
-        .on('mousemove', function() {
-            // console.log(event); // log the mouse x,y position
-            tooltipDiv
-                .html(domToSvg(event).x + ', ' + domToSvg(event).y)
-                .style('left', (event.pageX + 10) + 'px')
-                .style('top', (event.pageY + 10) + 'px')
-                .style('opacity', 0.9);
-        })
-        .on('mouseout', function() {
-            tooltipDiv
-                .style('opacity', 0);
-        });
+    if (!!scaleConfig.title.display) {
+        axis
+            .append('text')
+            .attr('text-anchor', 'middle')
+            .attr('transform', getAxisTitleTransform(config, scaleId))
+            .attr('fill', scaleConfig.title.color)
+            .text(scaleConfig.title.text);
+    }
 }
 
-function accessorX(config) {
-    const x = config.parsing.xAxisKey;
-    return function(d, i) {
-        return d[x];
+export function drawGrid(config, data, parentElement, scaleId, scale = makeScale(config, data, scaleId)) {
+
+    const scaleConfig = config.scales[scaleId];
+
+    if (!scaleConfig.grid.display || !data.length) {
+        return;
+    }
+
+    const axisGenerator = (getAxis(config, scaleId)(scale))
+        .tickFormat('')
+        .tickSize(-(getGridLength(config, scaleId)));
+
+    const axis = getElementSelection(parentElement, 'g', `${scaleId}-grid`)
+        .style('stroke-width', scaleConfig.grid.width)
+        .style('color', scaleConfig.grid.color)
+        .attr('transform', getAxisTransform(config, scaleId))
+        .call(axisGenerator);
+
+    if (!scaleConfig.grid.drawBorder) {
+        axis
+            .call(g => g.select('.domain').remove());
+    }
+}
+
+export function drawAnnotation(
+    config,
+    data,
+    parentElement,
+    xScaleId = 'x',
+    yScaleId = 'y',
+    scX = makeScale(config, data, xScaleId),
+    scY = makeScale(config, data, yScaleId)
+) {
+
+    const annotationsConfig = get(config, 'annotation.annotations', {});
+
+    resolveAnnotationsConfig(annotationsConfig);
+
+    const effectiveAnnotationsConfig = [];
+
+    for (const [, annotationConfigValue] of Object.entries(annotationsConfig)) {
+        effectiveAnnotationsConfig.push(annotationConfigValue);
+    }
+
+    drawAnnotationRect(effectiveAnnotationsConfig, config, data, parentElement, xScaleId, yScaleId, scX, scY);
+
+    drawAnnotationLines(effectiveAnnotationsConfig, config, data, parentElement, xScaleId, yScaleId, scX, scY);
+
+    drawAnnotationPoints(effectiveAnnotationsConfig, config, data, parentElement, xScaleId, yScaleId, scX, scY);
+}
+
+export function resolveAnnotationsConfig(annotationsConfig) {
+    for (const [annotationConfigKey, annotationConfigValue] of Object.entries(annotationsConfig)) {
+        annotationsConfig[annotationConfigKey] = Object.assign({},
+            annotationConfigDefaults(annotationConfigValue.type),
+            annotationConfigValue,
+            {
+                annotationId: annotationConfigKey
+            });
+    }
+}
+
+function drawAnnotationRect(
+    annotationsConfig,
+    config,
+    data,
+    parentElement,
+    xScaleId = 'x',
+    yScaleId = 'y',
+    scX = makeScale(config, data, xScaleId),
+    scY = makeScale(config, data, yScaleId)
+) {
+
+    const rectAnnotationsConfig = annotationsConfig.filter((d) => d.type === 'box' && d.display);
+
+    const groupByParentSelector = groupBy(rectAnnotationsConfig, 'parentSelector');
+
+    const [xMin, xMax] = scX.domain();
+    const [yMin, yMax] = scY.domain();
+
+    for (const [parentSelector, rectAnnotations] of Object.entries(groupByParentSelector)) {
+
+        let parentElementSelection = select(parentSelector === 'DEFAULT' ? parentElement : parentSelector);
+
+        parentElementSelection = (parentElementSelection.node() ? parentElementSelection : select(parentElement));
+
+        parentElementSelection
+            .selectAll('.annotation-rect')
+            .data(rectAnnotations, (d) => d.annotationId)
+            .join('rect')
+            .attr('class', 'annotation-rect')
+            .attr('x', function(d, i) {
+                return scX(d.xMin || xMin);
+            })
+            .attr('y', function(d, i) {
+                return scY(d.yMin || yMin);
+            })
+            .attr('height', function(d, i) {
+                return scY(d.yMax || yMax) - scY(d.yMin || yMin);
+            })
+            .attr('width', function(d, i) {
+                return scX(d.xMax || xMax) - scX(d.xMin || xMin);
+            })
+            .attr('stroke-width', function(d, i) {
+                return d.borderWidth;
+            })
+            .attr('stroke', function(d, i) {
+                return d.borderColor;
+            })
+            .attr('stroke-dasharray', function(d, i) {
+                return d.borderDash;
+            })
+            .style('fill', function(d, i) {
+                return d.backgroundColor;
+            });
+    }
+}
+
+function drawAnnotationLines(
+    annotationsConfig,
+    config,
+    data,
+    parentElement,
+    xScaleId = 'x',
+    yScaleId = 'y',
+    scX = makeScale(config, data, xScaleId),
+    scY = makeScale(config, data, yScaleId)
+) {
+
+    const annotationLineOptions = annotationsConfig.filter((d) => d.type === 'line' && d.display);
+
+    const groupByParentSelector = groupBy(annotationLineOptions, 'parentSelector');
+
+    const [xMin, xMax] = scX.domain();
+    const [yMin, yMax] = scY.domain();
+
+    for (const [parentSelector, lineAnnotations] of Object.entries(groupByParentSelector)) {
+
+        let parentElementSelection = select(parentSelector === 'DEFAULT' ? parentElement : parentSelector);
+
+        parentElementSelection = (parentElementSelection.node() ? parentElementSelection : select(parentElement));
+
+        parentElementSelection
+            .selectAll('.annotation-line')
+            .data(lineAnnotations, (d) => d.annotationId)
+            .join('line')
+            .attr('class', 'annotation-line')
+            .attr('x1', function(d, i) {
+                return scX(d.xMin || xMin);
+            })
+            .attr('y1', function(d, i) {
+                return scY(d.yMin || yMin);
+            })
+            .attr('x2', function(d, i) {
+                return scX(d.xMax || xMax);
+            })
+            .attr('y2', function(d, i) {
+                return scY(d.yMax || yMax);
+            })
+            .attr('stroke-width', function(d, i) {
+                return d.borderWidth;
+            })
+            .attr('stroke', function(d, i) {
+                return d.borderColor;
+            })
+            .attr('stroke-dasharray', function(d, i) {
+                return d.borderDash;
+            });
+    }
+}
+
+function drawAnnotationPoints(
+    annotationsConfig,
+    config,
+    data,
+    parentElement,
+    xScaleId = 'x',
+    yScaleId = 'y',
+    scX = makeScale(config, data, xScaleId),
+    scY = makeScale(config, data, yScaleId)
+) {
+
+    const [xMin, xMax] = scX.range();
+    const [yMin, yMax] = scY.range();
+
+    const xMid = (xMin + xMax) / 2;
+    const yMid = (yMin + yMax) / 2;
+
+    const pointAnnotationsConfig = annotationsConfig.filter((d) => d.type === 'point' && d.display);
+
+    const pointAnnotationsConfigByParentSelector = groupBy(pointAnnotationsConfig, 'parentSelector');
+
+    for (const [parentSelector, pointAnnotations] of Object.entries(pointAnnotationsConfigByParentSelector)) {
+
+        let parentElementSelection = select(parentSelector === 'DEFAULT' ? parentElement : parentSelector);
+
+        parentElementSelection = (parentElementSelection.node() ? parentElementSelection : select(parentElement));
+
+        const annotationPointsGroup = parentElementSelection
+            .selectAll('g.annotation-point')
+            .data(pointAnnotations, (d) => d.annotationId)
+            .join('g')
+            .attr('class', 'annotation-point')
+            .attr('transform', function(d) {
+                return 'translate(' + (d.xValue ? scX(d.xValue) : xMid) + ',' + (d.yValue ? scY(d.yValue) : yMid) + ')';
+            });
+
+        // render shapes
+        annotationPointsGroup
+            .filter(d => d.hasOwnProperty('shape') && d.shape)
+            .each(function(d, i) {
+                let itemPath = select(this)
+                    .select('path.annotation-point-path');
+                if (!itemPath.node()) {
+                    itemPath = select(this)
+                        .append('path')
+                        .attr('class', 'annotation-point-path');
+                }
+                itemPath
+                    .attr('d', function(d, i) {
+                        const shapeFn = symbolTypes[d.shape];
+                        if (d.size) {
+                            shapeFn.size(d.size);
+                        }
+                        return shapeFn();
+                    })
+                    .attr('stroke', d => d.borderColor)
+                    .attr('fill', d => d.backgroundColor);
+            });
+
+        // render images
+        annotationPointsGroup
+            .filter(d => d.hasOwnProperty('image') && d.image)
+            .each(function(d, i) {
+                let itemImage = select(this)
+                    .select('.annotation-point-image');
+                if (!itemImage.node()) {
+                    itemImage = select(this)
+                        .append('svg:image')
+                        .attr('class', 'annotation-point-image');
+                }
+                itemImage
+                    .attr('xlink:href', d => d.image)
+                    .attr('width', d => d.imageWidth)
+                    .attr('height', d => d.imageHeight)
+                    .attr('x', d => -(d.imageWidth / 2))
+                    .attr('y', d => -(d.imageHeight / 2));
+            });
+    }
+}
+
+function getAccessor(config, scaleId) {
+    const axisKey = getAxisKey(config, scaleId);
+    return function accessorFn(d, i) {
+        return d[axisKey];
     };
 }
 
-function accessorY(config) {
-    const y = config.parsing.yAxisKey;
-    return function(d, i) {
-        return d[y];
-    };
+function getAxisKey(config, scaleId) {
+    return config.parsing[scaleId + 'AxisKey'];
 }
 
-function domainX(config, data) {
-    const xMin = config.scales.x.min;
-    const xMax = config.scales.x.max;
-    if (xMin || xMax) {
+function getDomain(config, data, scaleId, accessor) {
+    const scaleConfig = config.scales[scaleId];
+
+    const sMin = scaleConfig.min;
+    const sMax = scaleConfig.max;
+    if (sMin || sMax) {
         return [
-            xMin ? xMin : min(data, accessorX(config)),
-            xMax ? xMax : max(data, accessorX(config))
+            sMin ? sMin : min(data, accessor),
+            sMax ? sMax : max(data, accessor)
         ];
     } else {
-        const xSuggestedMin = config.scales.x.suggestedMin;
-        const xSuggestedMax = config.scales.x.suggestedMax;
-        if (xSuggestedMin || xSuggestedMax) {
-            const calculatedMin = min(data, accessorX(config));
-            const calculatedMax = max(data, accessorX(config));
+        const sSuggestedMin = scaleConfig.suggestedMin;
+        const sSuggestedMax = scaleConfig.suggestedMax;
+        if (sSuggestedMin || sSuggestedMax) {
+            const calculatedMin = min(data, accessor);
+            const calculatedMax = max(data, accessor);
             return [
-                xSuggestedMin ? Math.min(calculatedMin, xSuggestedMin) : calculatedMin,
-                xSuggestedMax ? Math.max(calculatedMax, xSuggestedMax) : calculatedMax
+                sSuggestedMin ? Math.min(calculatedMin, sSuggestedMin) : calculatedMin,
+                sSuggestedMax ? Math.max(calculatedMax, sSuggestedMax) : calculatedMax
             ];
         }
     }
-    return extent(data, accessorX(config));
+    return extent(data, accessor);
 }
 
-function domainY(config, data) {
-    const yMin = config.scales.y.min;
-    const yMax = config.scales.y.max;
-    if (yMin || yMax) {
-        return [
-            yMin ? yMin : min(data, accessorY(config)),
-            yMax ? yMax : max(data, accessorY(config))
-        ];
-    } else {
-        const ySuggestedMin = config.scales.y.suggestedMin;
-        const ySuggestedMax = config.scales.y.suggestedMax;
-        if (ySuggestedMin || ySuggestedMax) {
-            const calculatedMin = min(data, accessorY(config));
-            const calculatedMax = max(data, accessorY(config));
-            return [
-                ySuggestedMin ? Math.min(calculatedMin, ySuggestedMin) : calculatedMin,
-                ySuggestedMax ? Math.max(calculatedMax, ySuggestedMax) : calculatedMax
-            ];
-        }
+function getRange(config, scaleId) {
+    if (['right', 'left'].includes(config.scales[scaleId].position)) {
+        return [config.height - config.margin.bottom, config.margin.top];
     }
-    return extent(data, accessorY(config));
-}
-
-function rangeX(config) {
-    return [config.margin.left, config.width - config.margin.right];
-}
-
-function rangeY(config) {
-    return [config.height - config.margin.bottom, config.margin.top];
-}
-
-function scaleX(config, data) {
-    const scale = scaleTime()
-        .domain(domainX(config, data))
-        .range(rangeX(config));
-    return config.scales.x.nice ? scale.nice() : scale;
-}
-
-function scaleY(config, data) {
-    const scale = scaleLinear()
-        .domain(domainY(config, data))
-        .range(rangeY(config));
-    return config.scales.y.nice ? scale.nice() : scale;
-}
-
-function drawGridLinesX(config, data, svg) {
-    if (!config.scales.x.grid.display || !data.length) {
-        return;
-    }
-
-    const scY = scaleY(config, data);
-
-    const xgridlines = axisLeft(scY)
-        .tickFormat('')
-        .tickSize(-(internalWidth(config)));
-
-    select(svg)
-        .select('g.x-grid')
-        .style('stroke-width', '0.2')
-        .style('color', 'var(--gray-4)')
-        .attr('transform', `translate(${config.margin.left}, 0)`)
-        .call(xgridlines);
-
-    select('g.x-grid path')
-        .remove();
-}
-
-function drawGridLinesY(config, data, svg) {
-    if (!config.scales.y.grid.display || !data.length) {
-        return;
-    }
-
-    const scX = scaleX(config, data);
-
-    const ygridlines = axisTop(scX)
-        .tickFormat('')
-        .tickSize(-(config.height - config.margin.bottom - config.margin.top));
-
-    select(svg)
-        .select('g.y-grid')
-        .style('stroke-width', '0.2')
-        .style('color', 'var(--gray-4)')
-        .attr('transform', `translate(0, ${config.margin.top})`)
-        .call(ygridlines);
-
-    select('g.y-grid path')
-        .remove();
-}
-
-function drawAxisX(config, data, svg) {
-
-    if (!config.scales.x.display) {
-        return;
-    }
-
-    const scX = scaleX(config, data);
-    let xAxisGenerator = axisBottom(scX)
-        .tickSize(config.scales.x.ticks.size)
-        .tickPadding(config.scales.x.ticks.padding)
-        .ticks(config.scales.x.ticks.count);
-
-    const tickSizeInner = config.scales.x.ticks.innerSize;
-    if (tickSizeInner !== undefined && tickSizeInner !== null) {
-        xAxisGenerator = xAxisGenerator.tickSizeInner(tickSizeInner);
-    }
-
-    if (config.scales.x.ticks.tickFormat) {
-        xAxisGenerator = xAxisGenerator.tickFormat(timeFormat(config.scales.x.ticks.tickFormat));
-    }
-
-    let xAxis = select(svg)
-        .select('g.x-axis')
-        .attr('transform', `translate(0, ${config.height - config.margin.bottom})`)
-        .style('color', config.scales.x.ticks.color)
-        .style('stroke-width', config.scales.x.ticks.font.weight)
-        .style('font-size', config.scales.x.ticks.font.size)
-        .call(xAxisGenerator);
-
-    if (config.scales.x.ticks.hideAxisLine) {
-        xAxis = xAxis.call(g => g.select('.domain').remove());
-    }
-
-    if (!!config.scales.x.title.display) {
-
-        const tickSize = config.scales.x.ticks.size;
-        const titleOffset = config.scales.x.ticks.padding + (tickSize > 0 ? tickSize : 0);
-
-        const titleX = config.width / 2;
-        const titleY = config.margin.bottom - titleOffset;
-
-        xAxis
-            .append('text')
-            .attr('text-anchor', 'middle')
-            .attr('transform', `translate(${titleX}, ${titleY})`)
-            .attr('fill', config.scales.x.title.color)
-            .text(config.scales.x.title.text);
-    }
-
-}
-
-function drawAxisY(config, data, svg) {
-
-    if (!config.scales.y.display) {
-        return;
-    }
-
-    const scY = scaleY(config, data);
-    const yAxisGenerator = (config.scales.y.position === 'right' ? axisRight(scY) : axisLeft(scY))
-        .tickSize(config.scales.y.ticks.size)
-        .tickPadding(config.scales.y.ticks.padding)
-        .ticks(config.scales.y.ticks.count);
-
-    let yAxis = select(svg).select('g.y-axis');
-    yAxis = config.scales.y.position === 'right'
-        ? yAxis.attr('transform', `translate(${config.width - config.margin.right}, 0)`)
-        : yAxis.attr('transform', `translate(${config.margin.left}, 0)`);
-
-    yAxis = yAxis.style('color', config.scales.y.ticks.color)
-        .style('stroke-width', config.scales.y.ticks.font.weight)
-        .style('font-size', config.scales.y.ticks.font.size)
-        .call(yAxisGenerator);
-
-    if (!!config.scales.y.title.display) {
-
-        const tickSize = config.scales.y.ticks.size;
-        const titleOffset = config.scales.y.ticks.padding + (tickSize > 0 ? tickSize : 0);
-
-        const titleX = config.margin.left - titleOffset;
-        const titleY = (config.height) / 2;
-
-        yAxis
-            .append('text')
-            .attr('text-anchor', 'middle')
-            .attr('transform', `translate(${-titleX}, ${titleY}) rotate(-90)`)
-            .attr('fill', config.scales.y.title.color)
-            .text(config.scales.y.title.text);
+    if (['top', 'bottom'].includes(config.scales[scaleId].position)) {
+        return [config.margin.left, config.width - config.margin.right];
     }
 }
 
-function internalWidth(config) {
+function getScaleByType(scaleType) {
+    switch (scaleType) {
+        case 'time':
+            return scaleTime();
+        case 'linear':
+        default:
+            return scaleLinear();
+    }
+}
+
+function getGridLength(config, scaleId) {
+    switch (config.scales[scaleId].position) {
+        case 'top':
+        case 'bottom':
+            return getInternalHeight(config);
+        case 'right':
+        case 'left':
+            return getInternalWidth(config);
+    }
+}
+
+function getAxisTitleTransform(config, scaleId) {
+
+    const scaleConfig = config.scales[scaleId];
+
+    const tickSize = scaleConfig.ticks.size;
+    const titleOffset = scaleConfig.ticks.padding + (tickSize > 0 ? tickSize : 0);
+
+    switch (config.scales[scaleId].position) {
+        case 'bottom':
+        case 'top':
+            return `translate(${(config.width / 2)}, ${(config.margin.bottom - titleOffset)})`;
+        case 'right':
+        case 'left':
+            return `translate(${-(config.margin.left - titleOffset)}, ${(config.height / 2)}) rotate(-90)`;
+    }
+}
+
+function getAxis(config, scaleId) {
+    switch (config.scales[scaleId].position) {
+        case 'bottom':
+            return axisBottom;
+        case 'right':
+            return axisRight;
+        case 'top':
+            return axisTop;
+        case 'left':
+            return axisLeft;
+    }
+}
+
+function getAxisTransform(config, scaleId) {
+    switch (config.scales[scaleId].position) {
+        case 'bottom':
+            return `translate(0, ${config.height - config.margin.bottom})`;
+        case 'right':
+            return `translate(${config.width - config.margin.right}, 0)`;
+        case 'top':
+            return `translate(0, ${config.margin.top})`;
+        case 'left':
+            return `translate(${config.margin.left}, 0)`;
+    }
+}
+
+function getInternalWidth(config) {
     return config.width - config.margin.right - config.margin.left;
 }
 
+function getInternalHeight(config) {
+    return config.height - config.margin.bottom - config.margin.top;
+}
+
 function drawPointsText(config, pointGroups, pointPaths) {
-    if (!config.points.labels.display) {
+    if (!get(config, 'points.labels.display', false)) {
         return;
     }
 
@@ -735,9 +985,9 @@ function drawPointsText(config, pointGroups, pointPaths) {
     }
 }
 
-function drawPointsTooltip(config, data, svg, pointPaths) {
+function drawPointsTooltip(config, data, parentElement, pointPaths) {
 
-    if (!config.points.tooltip.display) {
+    if (!get(config, 'points.tooltip.display', false)) {
         return;
     }
 
@@ -746,7 +996,7 @@ function drawPointsTooltip(config, data, svg, pointPaths) {
         : (
             select('body')
                 .append('div')
-                .attr('class', 'chart-tooltip top')
+                .attr('class', 'chart-tooltip')
                 .style('position', 'absolute')
                 .style('text-align', config.points.tooltip.textAlign)
                 .style('width', config.points.tooltip.width)
@@ -758,19 +1008,20 @@ function drawPointsTooltip(config, data, svg, pointPaths) {
                 .style('border-color', config.points.tooltip.borderColor)
                 .style('border-radius', config.points.tooltip.borderRadius)
                 .style('pointer-events', config.points.tooltip.pointerEvents)
+                .style('box-shadow', '0 3px 10px rgb(0 0 0 / 0.2)')
                 .style('opacity', 0)
         );
 
     function doHighlightPoint(d, i) {
-        select(svg)
+        select(parentElement)
             .select('#pointHighlight')
             .selectAll('stop').each(function(e, j) {
             if (j === 0) {
                 select(this)
-                    .attr('stop-color', config.points.backgroundColor(d, i));
+                    .attr('stop-color', getConfigValue(config.points.backgroundColor, d, i));
             } else {
                 select(this)
-                    .attr('stop-color', config.points.borderColor(d, i));
+                    .attr('stop-color', getConfigValue(config.points.borderColor, d, i));
             }
         });
 
@@ -789,10 +1040,27 @@ function drawPointsTooltip(config, data, svg, pointPaths) {
 
         const tooltipBox = tooltipDiv.node().getBoundingClientRect();
         const pointPathBox = this.getBoundingClientRect();
-        const dy = config.points.tooltip.offset; // render tooltip at relative distance from point.
+        const dy = config.points.tooltip.offset; // render tooltip at relative distance from point. vertical offset.
+
+        const tooltipLeft = ((pointPathBox.left + (pointPathBox.width / 2)) - (tooltipBox.width / 2));
+        const tooltipTop = (window.scrollY + pointPathBox.top - (tooltipBox.height + pointPathBox.height) - dy);
+
+        const boundingClientRect = parentElement.getBoundingClientRect();
+
+        if (tooltipLeft + tooltipBox.width > boundingClientRect.right) {
+            // move box left when overflowing on the right edge
+            tooltipDiv
+                .style('left', Math.floor(boundingClientRect.right - tooltipBox.width) + 'px');
+        } else if (tooltipLeft < boundingClientRect.left) {
+            // move box right when overflowing on the left edge
+            tooltipDiv
+                .style('left', boundingClientRect.left + 'px');
+        } else {
+            tooltipDiv
+                .style('left', tooltipLeft + 'px');
+        }
         tooltipDiv
-            .style('left', ((pointPathBox.left + (pointPathBox.width / 2)) - (tooltipBox.width / 2)) + 'px')
-            .style('top', (window.scrollY + pointPathBox.top - (tooltipBox.height + pointPathBox.height) - dy) + 'px');
+            .style('top', (tooltipTop < 0 ? 0 : tooltipTop) + 'px');
     }
 
     function hideTooltip() {
@@ -819,24 +1087,39 @@ function drawPointsTooltip(config, data, svg, pointPaths) {
         });
 }
 
-function animateLine(config, linePath) {
+function animateLine(config, data, linePath, lineMakerFn) {
 
     const animation = resolveAnimationConfig(config.line.animation);
 
     if (!animation.enabled) {
+        linePath
+            .attr('d', lineMakerFn(data));
         return;
     }
-    // Line grow animation
-    const totalLength = linePath.node().getTotalLength();
 
-    linePath
-        .attr('stroke-dasharray', `${totalLength} ${totalLength}`)
-        .attr('stroke-dashoffset', totalLength)
-        .transition()
+    const t = transition()
         .duration(animation.duration)
         .delay(animation.delay)
-        .ease(resolveEase(animation.ease))
-        .attr('stroke-dashoffset', 0);
+        .ease(resolveEase(animation.ease));
+
+    switch (animation.type) {
+        case 'grow':
+            // Line grow animation
+            const totalLength = linePath.node().getTotalLength();
+
+            linePath
+                .attr('stroke-dasharray', `${totalLength} ${totalLength}`)
+                .attr('stroke-dashoffset', totalLength)
+                .transition(t)
+                .attr('stroke-dashoffset', 0);
+            break;
+        case 'simple':
+        default:
+            linePath
+                .transition(t)
+                .attr('d', lineMakerFn(data));
+    }
+
 }
 
 function animatePointGroupsEnter(config, enter, scX, scY, x, y) {
@@ -882,14 +1165,6 @@ function animatePointGroupsExit(config, exit, scX, scY, x, y) {
     }
 }
 
-function getConfigValue(valOrFn, d, i) {
-    if (!valOrFn) {
-        return valOrFn;
-    }
-
-    return typeof valOrFn === 'function' ? valOrFn(d, i) : valOrFn;
-}
-
 function resolveAnimationConfig(animationConfig) {
     const resolvedConfig = animationConfigDefaults();
     if (!animationConfig) {
@@ -910,12 +1185,13 @@ function animationConfigDefaults() {
         enabled: true,
         duration: 1000,
         easing: 'easeLinear',
-        delay: null
+        delay: null,
+        type: 'simple'
     };
 }
 
-function resolveEase(easeStr) {
-    switch (easeStr) {
+function resolveEase(easing) {
+    switch (easing) {
         case 'easeElastic':
             return easeElastic;
         case 'easeBounce':
@@ -939,4 +1215,169 @@ function resolveEase(easeStr) {
         default:
             return easeLinear;
     }
+}
+
+function annotationConfigDefaults(annotationType) {
+    let result;
+    switch (annotationType) {
+        case 'box':
+            result = {
+                display: true,
+                type: 'box',
+                xMin: null,
+                xMax: null,
+                yMin: null,
+                yMax: null,
+                borderColor: null,
+                borderWidth: null,
+                borderDash: null,
+                backgroundColor: 'var(--gray-8)',
+                parentSelector: 'DEFAULT',
+                xAxisID: 'x',
+                yAxisID: 'y'
+            };
+            break;
+        case 'line':
+            result = {
+                display: true,
+                type: 'line',
+                xMin: null,
+                xMax: null,
+                yMin: null,
+                yMax: null,
+                borderColor: 'var(--gray-5)',
+                borderWidth: 0.5,
+                borderDash: [2, 2],
+                parentSelector: 'DEFAULT',
+                xAxisID: 'x',
+                yAxisID: 'y'
+            };
+            break;
+        case 'point':
+        default:
+            result = {
+                display: true,
+                type: 'point',
+                xValue: null,
+                yValue: null,
+                image: null,
+                imageWidth: 10,
+                imageHeight: 10,
+                shape: null,
+                size: 20,
+                borderColor: null,
+                backgroundColor: null,
+                parentSelector: 'DEFAULT',
+                xAxisID: 'x',
+                yAxisID: 'y'
+            };
+    }
+    return result;
+}
+
+function datasetConfigDefaults(label) {
+    return {
+        label,
+        xAxisID: 'x',
+        yAxisID: 'y'
+    };
+}
+
+/**
+ *
+ * @param {DOMElement} parentElement - html element that will act as the parent of the element to be (created if not exists and) returned
+ * @param {string} elementName - name of the html element to be created under the parent.
+ * @param {string | array} classNames - class names to be used to look up the element under the parent,
+ *                                      and if not exists add the class names to the element after creation.
+ * @returns {Selection} - a d3 Selection of the element.
+ */
+function getElementSelection(parentElement, elementName, classNames) {
+    let elementSelection = select(parentElement)
+        .select(`${elementName}.${Array.isArray(classNames) ? classNames.join('.') : classNames}`);
+    if (!elementSelection.node()) {
+        elementSelection = select(parentElement)
+            .append(elementName)
+            .attr('class', Array.isArray(classNames) ? classNames.join(' ') : classNames);
+    }
+    // Adding id's to dyanmically created groups.
+    if (!elementSelection.attr('id') && select(parentElement).attr('id')) {
+        elementSelection.attr('id', `${select(parentElement).attr('id')}_${Array.isArray(classNames) ? classNames.reverse().join('_') : classNames}`);
+    }
+    return elementSelection;
+}
+
+/**
+ * @param {function|string|number} valOrFn
+ * @param {object} d
+ * @param {index} i
+ * @returns {*} - the value of a config property. If value is a function, it executes the function and retuns the value,
+ *                if value is a string, returns the value.
+ */
+function getConfigValue(valOrFn, d, i) {
+    if (!valOrFn) {
+        return valOrFn;
+    }
+
+    return typeof valOrFn === 'function' ? valOrFn(d, i) : valOrFn;
+}
+
+/**
+ * @param {array} array - an array of objects
+ * @param {string} prop - a property of an object in the array
+ * @returns {object} - an object with key as the prop's value and value as array of object that have the same prop value.
+ */
+function groupBy(array, prop) {
+    return array.reduce((acc, e) => {
+        (acc[e[prop]] = acc[e[prop]] || []).push(e);
+        return acc;
+    }, {});
+}
+
+export function debugChart(config, data, svg) {
+
+    // DOM to SVG coordinate translation
+    function domToSvg(event) {
+
+        const pt = svg.createSVGPoint();
+
+        // pass event coordinates
+        pt.x = event.clientX;
+        pt.y = event.clientY;
+
+        // transform to SVG coordinates
+        return pt.matrixTransform(svg.getScreenCTM().inverse());
+    }
+
+    const tooltipDiv = select('div.debug-chart-tooltip').node()
+        ? select('div.debug-chart-tooltip')
+        : (
+            select('body')
+                .append('div')
+                .attr('class', 'debug-chart-tooltip top')
+                .style('position', 'absolute')
+                .style('overflow', 'warp')
+                .style('text-align', 'center')
+                .style('width', 'auto')
+                .style('height', 'auto')
+                .style('padding', '8px')
+                .style('background-color', '#4E4E4E')
+                .style('color', '#FFFFFF')
+                .style('pointer-events', 'none')
+                .style('opacity', 0)
+        );
+
+    select(svg)
+        .attr('style', 'border:1px solid black')
+        .on('mousemove', function() {
+            // console.log(event); // log the mouse x,y position
+            tooltipDiv
+                .html(domToSvg(event).x + ', ' + domToSvg(event).y)
+                .style('left', (event.pageX + 10) + 'px')
+                .style('top', (event.pageY + 10) + 'px')
+                .style('opacity', 0.9);
+        })
+        .on('mouseout', function() {
+            tooltipDiv
+                .style('opacity', 0);
+        });
 }
