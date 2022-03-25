@@ -329,7 +329,7 @@ export function drawPoints(
 
     drawPointsTooltip(config, data, parentElement, pointPaths);
 
-    drawPointsText(config, pointsGroup, pointPaths);
+    drawPointsLabel(config, pointsGroup, pointPaths);
 
     function getPointPathShape(d, i) {
         const shape = getConfigValue(config.points.shape, d, i);
@@ -427,12 +427,12 @@ export function drawLegend(config, parentElement) {
                     return d.point.text.text;
                 })
                 .style('font-size', function(d) {
-                    return d.point.text.fontSize ? d.point.text.fontSize : '6px';
+                    return getIfEmpty(d, 'point.text.fontSize', '6px');
                 })
                 .attr('fill', d => d.point.backgroundColor)
                 .attr('dominant-baseline', 'middle')
                 .attr('transform', function(d, i) {
-                    return `translate(${d.point.text.x ? d.point.text.x : 0}, ${d.point.text.y ? d.point.text.y : 0})`;
+                    return `translate(${getIfEmpty(d, 'point.text.x', 0)}, ${getIfEmpty(d, 'point.text.y', 0)})`;
                 });
         });
 
@@ -541,31 +541,66 @@ export function drawGrid(config, data, parentElement, scaleId, scale = makeScale
     }
 }
 
-export function drawAnnotation(
-    config,
-    data,
-    parentElement,
-    xScaleId = 'x',
-    yScaleId = 'y',
-    scX = makeScale(config, data, xScaleId),
-    scY = makeScale(config, data, yScaleId)
-) {
+/**
+ * Group annotations by xAxisID and yAxisID, and render annotations using scales for those AxisID's.
+ * For multi-axis annotations.
+ * @param config
+ * @param data
+ * @param parentElement
+ * @param scales
+ */
+export function drawAnnotations(config, data, parentElement, scales) {
 
     const annotationsConfig = get(config, 'annotation.annotations', {});
 
     resolveAnnotationsConfig(annotationsConfig);
 
-    const effectiveAnnotationsConfig = [];
+    const annotationGroupByAxes = {};
 
-    for (const [, annotationConfigValue] of Object.entries(annotationsConfig)) {
-        effectiveAnnotationsConfig.push(annotationConfigValue);
+    for (const [annotationKey, annotationValue] of Object.entries(annotationsConfig)) {
+
+        (annotationGroupByAxes[`${annotationValue.xAxisID},${annotationValue.yAxisID}`] =
+            (annotationGroupByAxes[`${annotationValue.xAxisID},${annotationValue.yAxisID}`] || {}))[annotationKey] = annotationValue;
     }
 
-    drawAnnotationRect(effectiveAnnotationsConfig, config, data, parentElement, xScaleId, yScaleId, scX, scY);
+    for (const [axesKey, annotations] of Object.entries(annotationGroupByAxes)) {
 
-    drawAnnotationLines(effectiveAnnotationsConfig, config, data, parentElement, xScaleId, yScaleId, scX, scY);
+        const [xScaleId, yScaleId] = axesKey.split(',');
 
-    drawAnnotationPoints(effectiveAnnotationsConfig, config, data, parentElement, xScaleId, yScaleId, scX, scY);
+        const effectiveAnnotationsConfig = Object.values(annotations);
+
+        drawAnnotationRect(effectiveAnnotationsConfig,
+            config, data, parentElement, xScaleId, yScaleId, scales[xScaleId].scale, scales[yScaleId].scale);
+
+        drawAnnotationLines(effectiveAnnotationsConfig,
+            config, data, parentElement, xScaleId, yScaleId, scales[xScaleId].scale, scales[yScaleId].scale);
+
+        drawAnnotationPoints(effectiveAnnotationsConfig,
+            config, data, parentElement, xScaleId, yScaleId, scales[xScaleId].scale, scales[yScaleId].scale);
+    }
+}
+
+export function drawAnnotation(
+    config,
+    data,
+    parentElement
+) {
+
+    const xScaleId = 'x';
+    const yScaleId = 'y';
+    const scX = makeScale(config, data, xScaleId);
+    const scY = makeScale(config, data, yScaleId);
+
+    const scales = {
+        [xScaleId]: {
+            scale: scX
+        },
+        [yScaleId]: {
+            scale: scY
+        }
+    };
+
+    drawAnnotations(config, data, parentElement, scales);
 }
 
 export function resolveAnnotationsConfig(annotationsConfig) {
@@ -597,11 +632,16 @@ function drawAnnotationRect(
     const [xMin, xMax] = scX.domain();
     const [yMin, yMax] = scY.domain();
 
+    select(parentElement).selectAll('rect.annotation-rect').remove();
+
     for (const [parentSelector, rectAnnotations] of Object.entries(groupByParentSelector)) {
 
-        let parentElementSelection = select(parentSelector === 'DEFAULT' ? parentElement : parentSelector);
+        let parentElementSelection = select(parentElement)
+            .select(parentSelector);
 
-        parentElementSelection = (parentElementSelection.node() ? parentElementSelection : select(parentElement));
+        if (!parentElementSelection.node()) {
+            parentElementSelection = select(parentElement);
+        }
 
         parentElementSelection
             .selectAll('.annotation-rect')
@@ -609,16 +649,16 @@ function drawAnnotationRect(
             .join('rect')
             .attr('class', 'annotation-rect')
             .attr('x', function(d, i) {
-                return scX(d.xMin || xMin);
+                return scX(getIfEmpty(d, 'xMin', xMin));
             })
             .attr('y', function(d, i) {
-                return scY(d.yMin || yMin);
+                return scY(getIfEmpty(d, 'yMin', yMin));
             })
             .attr('height', function(d, i) {
-                return scY(d.yMax || yMax) - scY(d.yMin || yMin);
+                return scY(getIfEmpty(d, 'yMax', yMax)) - scY(getIfEmpty(d, 'yMin', yMin));
             })
             .attr('width', function(d, i) {
-                return scX(d.xMax || xMax) - scX(d.xMin || xMin);
+                return scX(getIfEmpty(d, 'xMax', xMax)) - scX(getIfEmpty(d, 'xMin', xMin));
             })
             .attr('stroke-width', function(d, i) {
                 return d.borderWidth;
@@ -631,6 +671,9 @@ function drawAnnotationRect(
             })
             .style('fill', function(d, i) {
                 return d.backgroundColor;
+            })
+            .style('fill-opacity', function(d, i) {
+                return d.opacity;
             });
     }
 }
@@ -653,11 +696,16 @@ function drawAnnotationLines(
     const [xMin, xMax] = scX.domain();
     const [yMin, yMax] = scY.domain();
 
+    select(parentElement).selectAll('line.annotation-line').remove();
+
     for (const [parentSelector, lineAnnotations] of Object.entries(groupByParentSelector)) {
 
-        let parentElementSelection = select(parentSelector === 'DEFAULT' ? parentElement : parentSelector);
+        let parentElementSelection = select(parentElement)
+            .select(parentSelector);
 
-        parentElementSelection = (parentElementSelection.node() ? parentElementSelection : select(parentElement));
+        if (!parentElementSelection.node()) {
+            parentElementSelection = select(parentElement);
+        }
 
         parentElementSelection
             .selectAll('.annotation-line')
@@ -665,16 +713,16 @@ function drawAnnotationLines(
             .join('line')
             .attr('class', 'annotation-line')
             .attr('x1', function(d, i) {
-                return scX(d.xMin || xMin);
+                return scX(getIfEmpty(d, 'xMin', xMin));
             })
             .attr('y1', function(d, i) {
-                return scY(d.yMin || yMin);
+                return scY(getIfEmpty(d, 'yMin', yMin));
             })
             .attr('x2', function(d, i) {
-                return scX(d.xMax || xMax);
+                return scX(getIfEmpty(d, 'xMax', xMax));
             })
             .attr('y2', function(d, i) {
-                return scY(d.yMax || yMax);
+                return scY(getIfEmpty(d, 'yMax', yMax));
             })
             .attr('stroke-width', function(d, i) {
                 return d.borderWidth;
@@ -709,11 +757,16 @@ function drawAnnotationPoints(
 
     const pointAnnotationsConfigByParentSelector = groupBy(pointAnnotationsConfig, 'parentSelector');
 
+    select(parentElement).selectAll('g.annotation-point').remove();
+
     for (const [parentSelector, pointAnnotations] of Object.entries(pointAnnotationsConfigByParentSelector)) {
 
-        let parentElementSelection = select(parentSelector === 'DEFAULT' ? parentElement : parentSelector);
+        let parentElementSelection = select(parentElement)
+            .select(parentSelector);
 
-        parentElementSelection = (parentElementSelection.node() ? parentElementSelection : select(parentElement));
+        if (!parentElementSelection.node()) {
+            parentElementSelection = select(parentElement);
+        }
 
         const annotationPointsGroup = parentElementSelection
             .selectAll('g.annotation-point')
@@ -721,7 +774,10 @@ function drawAnnotationPoints(
             .join('g')
             .attr('class', 'annotation-point')
             .attr('transform', function(d) {
-                return 'translate(' + (d.xValue ? scX(d.xValue) : xMid) + ',' + (d.yValue ? scY(d.yValue) : yMid) + ')';
+                if (d.transform) {
+                    return d.transform(d, scX, scY);
+                }
+                return `translate(${scX(getIfEmpty(d, 'xValue', xMid))}, ${scY(getIfEmpty(d, 'yValue', yMid))})`;
             });
 
         // render shapes
@@ -782,22 +838,21 @@ function getAxisKey(config, scaleId) {
 function getDomain(config, data, scaleId, accessor) {
     const scaleConfig = config.scales[scaleId];
 
-    const sMin = scaleConfig.min;
-    const sMax = scaleConfig.max;
-    if (sMin || sMax) {
+    const scaleMin = scaleConfig.min;
+    const scaleMax = scaleConfig.max;
+    if (isNotEmpty(scaleMin) || isNotEmpty(scaleMax)) {
         return [
-            sMin ? sMin : min(data, accessor),
-            sMax ? sMax : max(data, accessor)
+            isNotEmpty(scaleMin) ? scaleMin : min(data, accessor),
+            isNotEmpty(scaleMax) ? scaleMax : max(data, accessor)
         ];
     } else {
-        const sSuggestedMin = scaleConfig.suggestedMin;
-        const sSuggestedMax = scaleConfig.suggestedMax;
-        if (sSuggestedMin || sSuggestedMax) {
-            const calculatedMin = min(data, accessor);
-            const calculatedMax = max(data, accessor);
+        const suggestedMin = scaleConfig.suggestedMin;
+        const suggestedMax = scaleConfig.suggestedMax;
+        if (isNotEmpty(suggestedMin) || isNotEmpty(suggestedMax)) {
+            const [calculatedMin, calculatedMax] = extent(data, accessor);
             return [
-                sSuggestedMin ? Math.min(calculatedMin, sSuggestedMin) : calculatedMin,
-                sSuggestedMax ? Math.max(calculatedMax, sSuggestedMax) : calculatedMax
+                isNotEmpty(suggestedMin) ? min([calculatedMin, suggestedMin]) : calculatedMin,
+                isNotEmpty(suggestedMax) ? max([calculatedMax, suggestedMax]) : calculatedMax
             ];
         }
     }
@@ -885,7 +940,8 @@ function getInternalHeight(config) {
     return config.height - config.margin.bottom - config.margin.top;
 }
 
-function drawPointsText(config, pointGroups, pointPaths) {
+function drawPointsLabel(config, pointGroups, pointPaths) {
+
     if (!get(config, 'points.labels.display', false)) {
         return;
     }
@@ -937,51 +993,51 @@ function drawPointsText(config, pointGroups, pointPaths) {
 
     if (!!config.points.labels.text) {
 
-        pointGroups
-            .each(function(d, i) {
+    pointGroups
+        .each(function(d, i) {
 
-                const pointLabelGroup = select(this);
+            const pointLabelGroup = select(this);
 
-                let pointLabel = pointLabelGroup.select('.point-label-text');
+            let pointLabel = pointLabelGroup.select('.point-label-text');
 
-                if (!pointLabel.node()) {
-                    pointLabel = pointLabelGroup
-                        // At this point a 'path' element denoting the point should exist.
-                        .insert('text', 'path')
-                        .attr('class', 'point-label-text');
-                }
-                pointLabel
+            if (!pointLabel.node()) {
+                pointLabel = pointLabelGroup
+                    // At this point a 'path' element denoting the point should exist.
+                    .insert('text', 'path')
+                    .attr('class', 'point-label-text');
+            }
+            pointLabel
                     .text(config.points.labels.text)
                     .attr('x', config.points.labels.x)
                     .attr('y', config.points.labels.y)
                     .attr('fill', config.points.labels.color)
                     .attr('font-size', config.points.labels.fontSize);
-            });
+        });
 
-        const pointLabels = pointGroups
-            .selectAll('text.point-label-text');
+    const pointLabels = pointGroups
+        .selectAll('text.point-label-text');
 
-        // Apply x and y offsets (dx & dy) automatically if x and y are not explicity provided.
-        pointLabels
-            .each(function(d, i) {
-                select(this)
-                    .attr('dx', (d, i) => {
-                        // center node on the point horizontally
-                        const node = pointLabels.nodes()[i];
-                        const attrX = node.getAttribute('x');
-                        return (!!attrX)
-                            ? undefined
-                            : -(node.getBBox().width / 2);
-                    })
-                    .attr('dy', (d, i) => {
-                        // position node vertically just above the point
-                        const node = pointLabels.nodes()[i];
-                        const attrY = node.getAttribute('y');
-                        return (!!attrY)
-                            ? undefined
-                            : -(pointPaths.nodes()[i].getBBox().height);
-                    });
-            });
+    // Apply x and y offsets (dx & dy) automatically if x and y are not explicity provided.
+    pointLabels
+        .each(function(d, i) {
+            select(this)
+                .attr('dx', (d, i) => {
+                    // center node on the point horizontally
+                    const node = pointLabels.nodes()[i];
+                    const attrX = node.getAttribute('x');
+                    return (!!attrX)
+                        ? undefined
+                        : -(node.getBBox().width / 2);
+                })
+                .attr('dy', (d, i) => {
+                    // position node vertically just above the point
+                    const node = pointLabels.nodes()[i];
+                    const attrY = node.getAttribute('y');
+                    return (!!attrY)
+                        ? undefined
+                        : -(pointPaths.nodes()[i].getBBox().height);
+                });
+        });
     }
 }
 
@@ -1232,6 +1288,7 @@ function annotationConfigDefaults(annotationType) {
                 borderWidth: null,
                 borderDash: null,
                 backgroundColor: 'var(--gray-8)',
+                opacity: '0.5',
                 parentSelector: 'DEFAULT',
                 xAxisID: 'x',
                 yAxisID: 'y'
@@ -1269,7 +1326,8 @@ function annotationConfigDefaults(annotationType) {
                 backgroundColor: null,
                 parentSelector: 'DEFAULT',
                 xAxisID: 'x',
-                yAxisID: 'y'
+                yAxisID: 'y',
+                transform: null
             };
     }
     return result;
@@ -1331,6 +1389,19 @@ function groupBy(array, prop) {
         (acc[e[prop]] = acc[e[prop]] || []).push(e);
         return acc;
     }, {});
+}
+
+function getIfEmpty(object, propertyPath, defaultValue) {
+    const result = get(object, propertyPath);
+    return isNotEmpty(result) ? result : defaultValue;
+}
+
+function isNotEmpty(value) {
+    return !isEmpty(value);
+}
+
+function isEmpty(value) {
+    return value === undefined || value === null;
 }
 
 export function debugChart(config, data, svg) {
