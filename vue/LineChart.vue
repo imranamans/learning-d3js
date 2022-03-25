@@ -5,6 +5,12 @@
              :viewBox="viewBox"
              class="line-chart"
              width="100%">
+            <defs>
+                <radialGradient id="pointHighlight">
+                    <stop offset="50%" stop-color="var(--brand-blue)" stop-opacity="1"/>
+                    <stop offset="100%" stop-color="var(--brand-blue)" stop-opacity="0.3"/>
+                </radialGradient>
+            </defs>
 
             <g :id="id + '_shadedRegionGroup'"
                class="shaded-region"></g>
@@ -26,27 +32,22 @@
             <g :id="id + '_legendGroup'"
                class="legend"></g>
 
-            <defs>
-                <radialGradient id="pointHighlight">
-                    <stop offset="50%" stop-color="var(--brand-blue)" stop-opacity="1"/>
-                    <stop offset="100%" stop-color="var(--brand-blue)" stop-opacity="0.3"/>
-                </radialGradient>
-            </defs>
+            <g :id="id + '_annotationsGroup'"
+               class="annotations"></g>
         </svg>
     </div>
 </template>
 
 <script>
 import {
-    clearChart,
     debugChart,
     drawAnnotation,
     drawAxes,
-    drawGridLines,
+    drawGrids,
     drawLegend,
     drawLine,
     drawPoints,
-    drawShadedRegion,
+    drawShadedRegion
 } from './Chart.js';
 import {merge} from 'lodash';
 
@@ -103,6 +104,10 @@ export default {
                 scales: {
                     x: {
                         display: true,
+                        position: 'bottom',
+                        axis: 'x',
+                        type: 'time',
+                        animate: false,
                         title: {
                             display: false,
                             text: null,
@@ -110,18 +115,24 @@ export default {
                         },
                         grid: {
                             display: false,
-                            color: 'var(--gray-7)'
+                            color: 'var(--gray-4)',
+                            width: 0.2,
+                            drawBorder: false
                         },
                         ticks: {
                             padding: 8,
                             size: -4,
+                            innerSize: null,
+                            outerSize: null,
                             count: null,
+                            timeInterval: null,
                             color: 'var(--gray-4)',
                             font: {
                                 size: '7px',
                                 weight: 0.5
                             },
-                            tickFormat: null
+                            tickFormat: null,
+                            hideAxisLine: false
                         },
                         nice: false,
                         min: null,
@@ -132,6 +143,9 @@ export default {
                     y: {
                         display: true,
                         position: 'left',
+                        axis: 'y',
+                        type: 'linear',
+                        animate: false,
                         title: {
                             display: false,
                             text: null,
@@ -139,17 +153,24 @@ export default {
                         },
                         grid: {
                             display: false,
-                            color: 'var(--gray-7)'
+                            color: 'var(--gray-4)',
+                            width: 0.2,
+                            drawBorder: false
                         },
                         ticks: {
                             padding: 10,
                             size: 0,
+                            innerSize: null,
+                            outerSize: null,
                             count: null,
+                            timeInterval: null,
                             color: 'var(--gray-4)',
                             font: {
                                 size: '8px',
                                 weight: 0.5
-                            }
+                            },
+                            tickFormat: null,
+                            hideAxisLine: false
                         },
                         nice: false,
                         min: null,
@@ -164,7 +185,9 @@ export default {
                     y: {
                         start: null,
                         end: null
-                    }
+                    },
+                    xAxisID: 'x',
+                    yAxisID: 'y'
                 },
                 points: {
                     display: true,
@@ -198,7 +221,7 @@ export default {
                         display: false,
                         callback: function(d, i) {
                             // can return html.
-                            return d.value;
+                            return '';
                         },
                         textAlign: 'center',
                         backgroundColor: 'var(--gray-1)',
@@ -214,6 +237,7 @@ export default {
                     }
                 },
                 line: {
+                    display: true,
                     color: 'var(--gray-4)',
                     width: 0.5,
                     animation: false
@@ -255,19 +279,16 @@ export default {
     methods: {
         drawChart() {
             debugChart(this.config, this.data, this.$refs.lineChart);
-            // drawShadedRegion(this.config, this.data, this.$refs.lineChart);
-            // drawGridLines(this.config, this.data, this.$refs.lineChart);
-            // drawAxes(this.config, this.data, this.$refs.lineChart);
+            drawShadedRegion(this.config, this.data, this.$refs.lineChart);
+            drawGrids(this.config, this.data, this.$refs.lineChart);
+            drawAxes(this.config, this.data, this.$refs.lineChart);
             drawLine(this.config, this.data, this.$refs.lineChart);
             drawPoints(this.config, this.data, this.$refs.lineChart);
-            // drawLegend(this.config, this.$refs.lineChart);
-            // drawAnnotation(this.config, this.data, this.$refs.lineChart);
+            drawLegend(this.config, this.$refs.lineChart);
+            drawAnnotation(this.config, this.data, this.$refs.lineChart);
         },
         redrawChart() {
-            // clearChart(this.config, this.data, this.$refs.lineChart);
-            // this.drawChart();
-            redrawLine(this.config, this.data, this.$refs.lineChart);
-            redrawPoints(this.config, this.data, this.$refs.lineChart);
+            this.drawChart();
         }
     }
 };
@@ -275,7 +296,7 @@ export default {
 
 <style scoped>
 
-@import '../../../css/color.css';
+@import '../../../../css/color.css';
 
 .line-chart-container {
     width: 100%;
@@ -289,30 +310,6 @@ g.shaded-region-border {
     stroke: var(--gray-5);
     stroke-dasharray: 2, 2;
     stroke-width: 0.5;
-}
-
-</style>
-
-<style>
-
-/* Creates a small triangle extender for the tooltip */
-.chart-tooltip:after {
-    box-sizing: border-box;
-    display: inline;
-    font-size: 10px;
-    width: 100%;
-    line-height: 1;
-    color: rgba(0, 0, 0, 0.8);
-    content: "\25BC";
-    position: absolute;
-    text-align: center;
-}
-
-/* Style top tooltip */
-.chart-tooltip.top:after {
-    margin: -2px 0 0 0;
-    top: 100%;
-    left: 0;
 }
 
 </style>
